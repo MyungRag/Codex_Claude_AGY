@@ -1,0 +1,41 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {IDBFactory} from 'fake-indexeddb';
+import {openStore,readState,saveState} from '../public/storage.js';
+
+const result=request=>new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+const transaction=tx=>new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+
+for(const version of [1,2])test(`version ${version} data migrates without loss; selected folder and deletion are atomic`,async()=>{
+  globalThis.indexedDB=new IDBFactory();
+  const open=indexedDB.open('agent-desk-projects',version);
+  open.onupgradeneeded=()=>{open.result.createObjectStore('workspace');if(version===2)open.result.createObjectStore('folders');};
+  const old=await result(open);
+  const original={projects:[{id:'kaf',name:'KAF',paths:{office:'C:\\KAF',home:'D:\\KAF'},folderNames:{home:'KAF home'},files:[{name:'reference.txt',data:'aGk='}]},{id:'keep',name:'Keep',paths:{office:'C:\\Keep'}}],revision:7};
+  const tx=old.transaction(version===2?['workspace','folders']:['workspace'],'readwrite');
+  tx.objectStore('workspace').put(original,'state');
+  if(version===2)for(const [key,name] of [['kaf:office','KAF office'],['kaf:home','KAF home'],['keep:office','Kept']])tx.objectStore('folders').put({kind:'directory',name},key);
+  await transaction(tx);old.close();
+  await openStore('home');
+  const migrated=await readState();
+  assert.equal(migrated.revision,8);
+  assert.deepEqual(migrated.projects[0].files,original.projects[0].files);
+  assert.equal(migrated.projects[0].paths.current,'D:\\KAF');
+  assert.equal(migrated.projects[0].paths.office,'C:\\KAF');
+  assert.equal(migrated.projects[0].gitUrl,'');
+  assert.equal(migrated.projects[1].paths.current,'C:\\Keep');
+  const db=await result(indexedDB.open('agent-desk-projects',3));
+  if(version===2)assert.equal((await result(db.transaction('folders').objectStore('folders').get('kaf:current'))).name,'KAF home');
+  await saveState(migrated,8,[{projectId:'kaf',profile:'current',handle:{kind:'directory',name:'New KAF'}},{projectId:'keep',profile:'current',handle:{kind:'directory',name:'Kept'}}]);
+  const next=await saveState({projects:[migrated.projects[1]]},9);
+  assert.equal(next.revision,10);assert.deepEqual((await readState()).projects,[migrated.projects[1]]);
+  const handles=await result(db.transaction('folders').objectStore('folders').getAllKeys());
+  assert.deepEqual(handles,version===2?['keep:current','keep:office']:['keep:current']);
+  await assert.rejects(saveState(migrated,9,[{projectId:'kaf',profile:'current',handle:{name:'stale'}}]),/다른 탭/);
+  assert.equal((await readState()).projects.length,1);
+  const cleared={...next.projects[0],paths:{...next.projects[0].paths,current:''},folderNames:{current:''}};
+  await saveState({projects:[cleared]},10,[{projectId:'keep',profile:'current',handle:null}]);
+  await openStore('office');
+  assert.equal((await readState()).projects[0].paths.current,'');
+  db.close();
+});

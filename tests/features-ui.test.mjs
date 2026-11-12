@@ -1,0 +1,38 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {JSDOM} from 'jsdom';
+import {IDBFactory} from 'fake-indexeddb';
+import {AgentRunner} from '../scripts/agent-runner.mjs';
+import {runProcess} from '../scripts/agent-process.mjs';
+import {createAppServer} from '../scripts/server.mjs';
+import {createPlan} from '../public/planning-model.js';
+import {validateProject} from '../public/model.js';
+const until=async check=>{for(let n=0;n<350;n++){if(await check())return;await new Promise(r=>setTimeout(r,15));}assert.fail('UI state not reached');};
+
+test('model controls persist and send selected effort; usage displays; select-all organizer previews, applies, undoes and rejects stale saves',async t=>{
+ const fixture=fileURLToPath(new URL('./fixtures/agent-cli.mjs',import.meta.url)),calls=[];
+ const service=new AgentRunner({resolve:async agent=>({command:process.execPath,prefix:[fixture,agent]}),catalog:async()=>({source:'cli',models:[{id:'gpt-6-astra',name:'GPT-6 Astra',efforts:['low','high','xhigh']}],note:'CLI 목록'}),run:(exe,args,opts)=>{if(!args.includes('--version')&&!args.includes('--help'))calls.push({agent:exe.prefix[1],args,input:opts.input});return runProcess(exe,args,opts);}});
+ const server=createAppServer({agentRunner:service});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,nativeFetch=globalThis.fetch;
+ const {window}=new JSDOM(await readFile(new URL('../public/index.html',import.meta.url),'utf8'),{url:base});
+ t.after(async()=>{window.close();globalThis.fetch=nativeFetch;await service.close();await new Promise(r=>server.close(r));});
+ for(const k of ['window','document','localStorage','sessionStorage','history','location','FormData'])globalThis[k]=k==='window'?window:window[k];globalThis.indexedDB=new IDBFactory();globalThis.BroadcastChannel=undefined;globalThis.fetch=(url,opts)=>nativeFetch(new URL(url,base),opts);
+ window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+ const storage=await import('../public/storage.js?v=0.7.0');await storage.openStore();const project=validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교'});project.planning=createPlan(project,true);await storage.saveState({projects:[project]},0);await import('../public/app.js');
+ const $=s=>document.querySelector(s),click=s=>{assert.ok($(s),s);$(s).click();},change=(s,value)=>{$(s).value=value;$(s).dispatchEvent(new window.Event('change',{bubbles:true}));},submit=s=>$(s).dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));const saved=async()=>(await storage.readState()).projects[0].planning;
+ click('[data-action="agents"]');await until(()=>!$('[data-ac="probe"][data-agent="codex"]')?.disabled);
+ click('[data-model-load="codex"]');await until(()=>$('.agent-error').textContent.includes('목록을 불러왔'));
+ change('[data-model-select="codex"]','gpt-6-astra');change('[data-effort-select="codex"]','xhigh');click('[data-ac="save-model"][data-agent="codex"]');assert.equal(JSON.parse(localStorage.getItem('agent-desk-models')).codex.effort,'xhigh');
+ click('[data-ac="close"]');click('[data-action="agents"]');await until(()=>!$('[data-ac="probe"][data-agent="codex"]')?.disabled);assert.equal($('[data-model-select="codex"]').value,'gpt-6-astra');assert.equal($('[data-effort-select="codex"]').value,'xhigh');
+ click('[data-ac="probe"][data-agent="codex"]');await until(()=>$('.agent-error').textContent.includes('응답을 확인'));assert.ok(calls[0].args.includes('model_reasoning_effort="xhigh"'));assert.match($('.usage-dashboard').textContent,/1,050/);click('[data-ac="close"]');
+ click('[data-action="open"][data-id="kaf"]');await until(()=>location.hash==='#kaf');click('[data-action="planning"]');click('[data-pa="select-all"]');assert.equal(document.querySelectorAll('.plan-node.chosen').length,3);
+ click('[data-pa="organize"]');await until(()=>$('#organize-form')&&!$('#organize-form .primary').disabled);assert.equal($('[data-model-select="codex"]').value,'gpt-6-astra');change('[data-effort-select="codex"]','high');submit('#organize-form');await until(()=>$('[data-org="apply"]')&&!$('[data-org="apply"]').disabled);
+ assert.equal((await saved()).nodes.length,4);assert.match($('.organize-summary').textContent,/3개 선택 → 1개/);assert.ok(calls[1].args.includes('model_reasoning_effort="high"'));assert.equal(JSON.parse(localStorage.getItem('agent-desk-models')).codex.effort,'xhigh');
+ click('[data-org="apply"]');await until(()=>!$('.agent-dialog'));assert.equal((await saved()).nodes.length,2);assert.equal((await saved()).nodes[1].title,'정리된 검색 흐름');
+ click('[data-pa="undo"]');await until(async()=> (await saved()).nodes.length===4);click('[data-pa="redo"]');await until(async()=> (await saved()).nodes.length===2);
+ click('[data-action="agents"]');await until(()=>$('.usage-dashboard')?.textContent.includes('2,100')&&!$('[data-ac="close"]').disabled);click('[data-ac="close"]');
+ click('[data-pa="select-all"]');click('[data-pa="organize"]');await until(()=>$('#organize-form')&&!$('#organize-form .primary').disabled);submit('#organize-form');await until(()=>$('[data-org="apply"]')&&!$('[data-org="apply"]').disabled);
+ const state=await storage.readState();await storage.saveState({...state,projects:state.projects.map(p=>({...p,description:'다른 탭의 변경'}))},state.revision);
+ click('[data-org="apply"]');await until(()=>$('.agent-error')?.textContent.includes('저장하지 못했습니다'));assert.equal((await storage.readState()).projects[0].description,'다른 탭의 변경');assert.ok($('.organize-preview-tree'));click('[data-org="close"]');
+});
