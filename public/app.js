@@ -1,8 +1,8 @@
-import {openConnections} from './agent-ui.js?v=0.9.3';
-import {mountPlanner} from './planning.js?v=0.9.3';
-import {mountDevelopment} from './development.js?v=0.9.3';
-import {COLORS,MAX_FILE_BYTES,MAX_PROJECTS,validateProject,readBackup,importCopies,selectProjects} from './model.js?v=0.9.3';
-import {openStore,readState,saveState} from './storage.js?v=0.9.3';
+import {openConnections} from './agent-ui.js?v=0.9.4';
+import {mountPlanner} from './planning.js?v=0.9.4';
+import {mountDevelopment} from './development.js?v=0.9.4';
+import {COLORS,MAX_FILE_BYTES,MAX_PROJECTS,validateProject,readBackup,importCopies,selectProjects} from './model.js?v=0.9.4';
+import {openStore,readState,saveState} from './storage.js?v=0.9.4';
 
 const $ = (selector, root=document) => root.querySelector(selector);
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -68,7 +68,7 @@ function shell() {
     <div class="sidebar-bottom"><div class="agent-row"><span class="agent-symbol mint">C</span><span class="agent-symbol orange">✳</span><span class="agent-symbol blue">A</span></div><p>세 에이전트, 하나의 공간.</p><small>Codex · Claude · Antigravity</small><div class="storage-indicator"><span></span>이 브라우저에 저장됨</div></div>
   </aside>
   <div class="main-wrap"><header class="topbar"><div class="breadcrumb">워크스페이스<span>/</span><button data-action="list">프로젝트</button>${active?`<span>/</span><strong>${esc(active.name)}</strong>`:''}</div><div class="topbar-actions"><button class="button compact" data-action="agents">${icon('link')}AI 연결</button><div class="pc-select current-device">${icon('monitor')}<span>현재 PC</span></div></div></header>
-  <main id="main" class="${active&&(isPlanning()||isDevelopment())?'planning-main':''}" tabindex="-1">${active?`<div class="project-subnav"><button data-action="overview" data-id="${active.id}" class="${!isPlanning()&&!isDevelopment()?'active':''}">${icon('folder')}프로젝트 정보</button><button data-action="planning" data-id="${active.id}" class="${isPlanning()?'active':''}">${icon('layers')}기획 보드</button><button data-action="development" data-id="${active.id}" class="${isDevelopment()?'active':''}">${icon('check')}개발·검토</button><span>아이디어에서 실행 가능한 결과까지</span></div>${isPlanning()?'<div id="planning-root"></div>':isDevelopment()?'<div id="development-root"></div>':detail(active)}`:list()}</main><footer class="page-footer"><span>Agent Desk <span class="muted">/</span> 프로젝트 · 기획 · 개발·검토 <small class="app-version">v0.9.3</small></span><a href="/download.html">${icon('download')} Windows 다운로드</a><button data-action="storage-info">${icon('info')}다른 PC에서 이어하기</button></footer></div>`;
+  <main id="main" class="${active&&(isPlanning()||isDevelopment())?'planning-main':''}" tabindex="-1">${active?`<div class="project-subnav"><button data-action="overview" data-id="${active.id}" class="${!isPlanning()&&!isDevelopment()?'active':''}">${icon('folder')}프로젝트 정보</button><button data-action="planning" data-id="${active.id}" class="${isPlanning()?'active':''}">${icon('layers')}기획 보드</button><button data-action="development" data-id="${active.id}" class="${isDevelopment()?'active':''}">${icon('check')}개발·검토</button><span>아이디어에서 실행 가능한 결과까지</span></div>${isPlanning()?'<div id="planning-root"></div>':isDevelopment()?'<div id="development-root"></div>':detail(active)}`:list()}</main><footer class="page-footer"><span>Agent Desk <span class="muted">/</span> 프로젝트 · 기획 · 개발·검토 <small class="app-version">v0.9.4</small></span><a href="/download.html">${icon('download')} Windows 다운로드</a><button data-action="storage-info">${icon('info')}다른 PC에서 이어하기</button></footer></div>`;
 }
 function list() {
   const projects=selectProjects(state.projects,{query,filter,sort});

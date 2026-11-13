@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createPlan,addNode,appendMessage,travelHistory,validatePlan} from '../public/planning-model.js';
 import {addDecision,updateDecision,finalizePlan,createAssignments,saveAssignments,handoffDocument} from '../public/decision-model.js';
-import {applyQuestionSynthesis,validateQuestionSynthesis,questionSynthesisPrompt} from '../public/review-model.js';
+import {applyQuestionSynthesis,validateQuestionSynthesis,questionSynthesisPrompt,questionSynthesisRepairPrompt} from '../public/review-model.js';
 import {organizePlan} from '../public/organize-model.js';
 
 const rec=(answer='DEG',kind='assumption',messageIds=[])=>({kind,answer,reason:kind==='unresolved'?'외부 자료 확인 필요':'계산기의 기본 각도 단위',messageIds});
@@ -48,11 +48,30 @@ test('explicit dialog answer and newly linked user conversation override default
 test('synthesis rejects omitted sources, lost existing questions, mismatched nodes and contradictory saved answers atomically',()=>{
  const {p,n}=sample();const first=addDecision(p,question(n.id));updateDecision(p,first.id,{answer:'DEG'},'confirm');
  const before=structuredClone(p),raw=merged(n,[first.id]);
- for(const mutate of [r=>r.items[0].sourceRefs.pop(),r=>r.items[0].existingIds=[],r=>r.items[0].nodeIds=['missing'],r=>r.items[0].recommendation=rec('RAD','user',['invented'])]){
+ for(const mutate of [r=>r.items[0].sourceRefs.pop(),r=>{r.items[0].existingIds=[];r.items[0].question='다른 질문';},r=>r.items[0].nodeIds=['missing'],r=>r.items[0].recommendation=rec('RAD','user',['invented'])]){
   const bad=structuredClone(raw);mutate(bad);assert.throws(()=>applyQuestionSynthesis(p,[n.id],jobs(n),bad,{id:'bad',lead:'codex'}));assert.deepEqual(p,before);
  }
  const second=addDecision(p,question(n.id,'두 번째 질문'));updateDecision(p,second.id,{answer:'RAD'},'confirm');raw.items[0].existingIds.push(second.id);
  assert.throws(()=>validateQuestionSynthesis(p,[n.id],jobs(n),raw),/서로 다른 기존 답변/);
+});
+
+test('exact bookkeeping repairs preserve saved user decisions without guessing semantic identity',()=>{
+ const {p,n}=sample(),original=addDecision(p,question(n.id));updateDecision(p,original.id,{answer:'RAD'},'confirm');
+ const raw=merged(n,[original.id,original.id]);raw.items[0].sourceRefs.push('codex-1');const before=structuredClone(raw);
+ const checked=validateQuestionSynthesis(p,[n.id],jobs(n),raw);assert.deepEqual(checked.items[0].existingIds,[original.id]);assert.equal(checked.items[0].sourceRefs.length,3);assert.ok(checked.normalizationNotes.length);assert.deepEqual(raw,before);
+ const missing=merged(n);const next=applyQuestionSynthesis(p,[n.id],jobs(n),missing,{id:'restored-link',lead:'codex'});
+ assert.equal(next.items.length,1);assert.equal(next.items[0].id,original.id);assert.equal(next.items[0].answer,'RAD');assert.equal(next.items[0].resolution.kind,'user');
+ const ambiguous=merged(n,[original.id]);ambiguous.items.push({...ambiguous.items[0],question:'도 단위가 기본인가요?',sourceRefs:[]});
+ assert.throws(()=>validateQuestionSynthesis(p,[n.id],jobs(n),ambiguous),e=>e.code==='QUESTION_SYNTHESIS_INVALID'&&e.details.duplicates[0]===original.id);
+});
+
+test('targeted correction identifies missing and unknown IDs and carries the invalid result as data',()=>{
+ const {project,p,n}=sample(),original=addDecision(p,question(n.id)),raw=merged(n,['invented']);raw.items[0].question='각도 해석 방식?';
+ let error;try{validateQuestionSynthesis(p,[n.id],jobs(n),raw);}catch(e){error=e;}
+ assert.equal(error.code,'QUESTION_SYNTHESIS_INVALID');assert.deepEqual(error.details.missing,[{id:original.id,question:original.question}]);assert.deepEqual(error.details.unknown,['invented']);
+ const prompt=questionSynthesisRepairPrompt(project,p,[n.id],jobs(n),raw,error,'기존 답변 보존');
+ assert.ok(prompt.includes(JSON.stringify(raw)));assert.ok(prompt.includes(JSON.stringify(error.details)));assert.match(prompt,/최대 1회/);assert.match(prompt,/이번 사용자 요구 \(messageId=review-input\): 기존 답변 보존/);
+ assert.equal(p.items[0].answer,'','repair prompt cannot apply a decision');
 });
 
 test('external fact checks and explicit deferrals remain unresolved while design defaults are adopted',()=>{

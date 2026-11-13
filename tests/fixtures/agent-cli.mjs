@@ -40,6 +40,7 @@ const schema=JSON.parse(agent==='claude'?schemaArg:await readFile(schemaArg,'utf
 if(schema.properties.items){
  const conflict=schema.properties.items.items.properties.type.enum.length===1&&schema.properties.items.items.properties.type.enum[0]==='conflict';
  delete output.nodes;output.items=[{type:conflict?'conflict':'question',nodeIds:['work-a'],relatedIds:conflict?['decision-a','decision-b']:prompt.includes('fixture:wrong-related-ids')?['work-a','invented-decision']:[],question:'어떤 가격을 비교할까요?',reason:'범위 확인',evidence:'사용자 확인 필요',options:[{label:'최종 가격',impact:'세금 포함'}],blocking:true,...(!conflict?{recommendation:{kind:'assumption',answer:'최종 가격',reason:'비교 가능한 최소 기준',messageIds:[]}}:{})}];
+ if(prompt.includes('fixture:question-repair'))Object.assign(output.items[0],{question:'각도 단위?',reason:'삼각함수 입력 해석',options:[{label:'DEG',impact:'도 단위'},{label:'RAD',impact:'라디안'}],recommendation:{kind:'assumption',answer:'DEG',reason:'일반 계산기 기본값',messageIds:[]}});
 }
 if(schema.properties.omitted){
  const read=label=>JSON.parse(prompt.split(label+': ')[1].split('\n')[0]);
@@ -47,6 +48,10 @@ if(schema.properties.omitted){
  output.items=originals.map(i=>({...i,existingIds:[i.id],sourceRefs:[],recommendation:i.recommendation||{kind:'unresolved',answer:'',reason:'기존 사용자 답변 유지',messageIds:[]}}));
  for(const source of sources){let item=output.items.find(i=>i.question===source.item.question);if(!item){item={...source.item,existingIds:[],sourceRefs:[]};output.items.push(item);}item.sourceRefs.push(source.ref);}
  output.omitted=[];
+ if(prompt.includes('fixture:question-repair')){
+  if(!prompt.includes('자동 정정 요청 (최대 1회)')){output.items[0].existingIds=[];output.items[0].question='삼각함수의 기본 각도 해석?';}
+  else await new Promise(r=>setTimeout(r,1500));
+ }
 }
 if(schema.properties.tasks){delete output.nodes;output.tasks=[{nodeId:'work-a',agent:'codex',dependsOn:[],instructions:'최종 가격을 비교한다',deliverable:'가격 비교 화면',criteria:'세금 포함 확인'}];}
 

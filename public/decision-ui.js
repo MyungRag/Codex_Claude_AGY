@@ -1,8 +1,8 @@
-import {applyQuestionSynthesis} from './review-model.js?v=0.9.3';
-import {esc} from './model-controls.js?v=0.9.3';
-import {decisionTypes,decisionStatuses,nodeFingerprint} from './decision-core.js?v=0.9.3';
-import {addDecision,updateDecision,applyDecisionReviews,readiness,finalizePlan,createAssignments,saveAssignments,handoffDocument,decisionPrompt} from './decision-model.js?v=0.9.3';
-import {openDecisionAI} from './decision-ai-ui.js?v=0.9.3';
+import {applyQuestionSynthesis} from './review-model.js?v=0.9.4';
+import {esc} from './model-controls.js?v=0.9.4';
+import {decisionTypes,decisionStatuses,nodeFingerprint} from './decision-core.js?v=0.9.4';
+import {addDecision,updateDecision,applyDecisionReviews,readiness,finalizePlan,createAssignments,saveAssignments,handoffDocument,decisionPrompt} from './decision-model.js?v=0.9.4';
+import {openDecisionAI} from './decision-ai-ui.js?v=0.9.4';
 const button=(action,label,attrs='')=>`<button type="button" data-dec="${action}" ${attrs}>${label}</button>`;
 const time=at=>new Date(at).toLocaleString('ko-KR');
 export function decisionCount(plan,id){return (plan.items||[]).filter(i=>(!id||i.nodeIds.includes(id))&&i.status!=='done').length;}

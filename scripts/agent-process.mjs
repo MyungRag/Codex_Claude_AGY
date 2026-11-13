@@ -60,7 +60,7 @@ export function readCodexModels(executable,{timeout=15000,signal}={}){
     if(message.id===0){send({method:'initialized'});next();}
     else if(message.id===pages){if(!Array.isArray(message.result?.data)){finish(new Error('모델 목록 형식이 지원되지 않습니다.'));return;}models.push(...message.result.data);const cursor=message.result.nextCursor;if(cursor&&pages<5&&!seen.has(cursor)){seen.add(cursor);next(cursor);}else{finish();return;}}
    }
-  });send({id:0,method:'initialize',params:{clientInfo:{name:'agent_desk',version:'0.9.3'}}});
+  });send({id:0,method:'initialize',params:{clientInfo:{name:'agent_desk',version:'0.9.4'}}});
  });
 }
 

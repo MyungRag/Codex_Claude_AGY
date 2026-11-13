@@ -1,9 +1,9 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.9.3';
-import {decisionPrompt} from './decision-model.js?v=0.9.3';
-import {questionSynthesisPrompt,validateQuestionSynthesis} from './review-model.js?v=0.9.3';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.3';
-import {decisionTypes} from './decision-core.js?v=0.9.3';
-import {esc,jobMetadataHTML} from './model-controls.js?v=0.9.3';
+import {openLeadReview} from './lead-review-ui.js?v=0.9.4';
+import {decisionPrompt} from './decision-model.js?v=0.9.4';
+import {questionSynthesisPrompt,questionSynthesisRepairPrompt,validateQuestionSynthesis} from './review-model.js?v=0.9.4';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.4';
+import {decisionTypes} from './decision-core.js?v=0.9.4';
+import {esc,jobMetadataHTML} from './model-controls.js?v=0.9.4';
 export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onApply,onClose,getApplyDiagnostics=()=>({})}){
  if(document.querySelector('.agent-dialog')){onClose();return;}
  // Older cached responses retain their original apply path; new reviews always use lead synthesis.
@@ -12,6 +12,7 @@ export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onAppl
   prompt:(instruction,scope)=>decisionPrompt(project,plan,'questions',scope)+'\n사용자 추가 요구: '+instruction+'\n사용자 대화: '+JSON.stringify(plan.messages.filter(m=>m.author==='user')),
   synthesize:(jobs,instruction,scope)=>questionSynthesisPrompt(project,plan,scope,jobs,instruction),
   validate:(result,jobs,instruction,scope)=>validateQuestionSynthesis(plan,scope,jobs,result,instruction),
+  repair:(result,error,jobs,instruction,scope)=>questionSynthesisRepairPrompt(project,plan,scope,jobs,result,error,instruction),
   onApply:async data=>onApply([{id:data.id,agent:data.lead,result:data.result,synthesis:data}],data.baseChange,data.nodeIds)
  });
  const title={questions:'현재 노드의 질문·제약 검토',conflicts:'확정 결정의 충돌 검토',handoff:'확정 기획의 업무 분담안'}[kind];
