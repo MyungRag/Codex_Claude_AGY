@@ -1,5 +1,5 @@
-import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.8.0';
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.8.0';
+import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.9.0';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.9.0';
 // Serializable graph operations. No agent calls or filesystem access occur here.
 export const AGENTS = [{id:'codex',name:'Codex',short:'C'},{id:'claude',name:'Claude',short:'✳'},{id:'agy',name:'AGY',short:'A'}];
 export const NODE_WIDTH=236, NODE_HEIGHT=204;
@@ -55,7 +55,7 @@ export function validatePlan(raw){
   const history=list(raw.history??[],60,'변경 이력').map(h=>({id:id(h.id),label:str(h.label,150,'변경 제목'),at:str(h.at,40,'변경 시각')}));
   return {...core,version:1,changeNumber:Number.isSafeInteger(raw.changeNumber)&&raw.changeNumber>=0?raw.changeNumber:0,history,undo:stack('undo'),redo:stack('redo')};
 }
-const coreOf=plan=>clone({rootId:plan.rootId,nodes:plan.nodes,edges:plan.edges,proposals:plan.proposals,messages:plan.messages,appliedRuns:plan.appliedRuns??[],items:plan.items??[],questionCoverage:plan.questionCoverage??[],baselines:plan.baselines??[],handoffs:plan.handoffs??[],demo:plan.demo});
+const coreOf=plan=>clone({rootId:plan.rootId,nodes:plan.nodes,edges:plan.edges,proposals:plan.proposals,messages:plan.messages,appliedRuns:plan.appliedRuns??[],items:plan.items??[],questionCoverage:plan.questionCoverage??[],baselines:plan.baselines??[],handoffs:plan.handoffs??[],reviewHistory:plan.reviewHistory??[],demo:plan.demo});
 export function changePlan(plan,label,operation){
   const next=clone(plan);operation(next);reconcileDecisions(plan,next);
   next.undo=[...plan.undo,{label,snapshot:coreOf(plan)}].slice(-12);next.redo=[];

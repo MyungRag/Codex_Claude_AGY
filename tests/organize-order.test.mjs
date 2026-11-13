@@ -73,7 +73,7 @@ test('organizer schema and prompt distinguish WBS, dependency scheduling and opt
  const required=ORGANIZE_SCHEMA.properties.nodes.items.required;
  for(const field of ['nodeType','order','dependsOn','functionSteps','dependencyState','dependencyIssues'])assert.ok(required.includes(field),field);
  const {p,a}=sample(),prompt=organizationPrompt({name:'계산 프로그램'},p,[a.id]);
- assert.match(prompt,/WBS/);assert.match(prompt,/실행 가능한 작업끼리만 order/);assert.match(prompt,/필요한 단계만/);assert.match(prompt,/mock/);assert.match(prompt,/사용자 미답변을 임의로 확정하지/);
+ assert.match(prompt,/WBS/);assert.match(prompt,/실행 가능한 작업끼리만 order/);assert.match(prompt,/필요한 단계만/);assert.match(prompt,/mock/);assert.match(prompt,/설계 선택의 미답변 자체를 의존성 오류로 만들지/);
 });
 
 test('organizer preview displays resolved predecessor names, implementation steps and group semantics before apply',async t=>{
@@ -87,7 +87,7 @@ test('organizer preview displays resolved predecessor names, implementation step
   item('screen',[b.id],{...meta({order:1,dependsOn:['core'],functionSteps:['<script>검증 단계</script>','실제 연동 확인']}),parentId:'group'})
  ]);
  sessionStorage.setItem('agent-desk-organize-'+project.id,JSON.stringify({selectedIds:[a.id,b.id],baseChange:p.changeNumber,agent:'codex',instruction:'',job:{id:'preview-order-job',status:'succeeded',result}}));
- const {openOrganizer}=await import('../public/organize-ui.js?v=0.8.0');
+ const {openOrganizer}=await import('../public/organize-ui.js?v=0.9.0');
  await openOrganizer({project,plan:p,selectedIds:[a.id,b.id],onApply:()=>{},onClose:()=>{}});
  const body=document.querySelector('.organize-preview-tree');assert.ok(body);
  assert.match(body.textContent,/묶음 · 직접 실행하지 않음/);assert.match(body.textContent,/우선순위 #1/);assert.match(body.textContent,/선행 구현: core/);assert.match(body.textContent,/함수 구현 순서 \(2단계\)/);

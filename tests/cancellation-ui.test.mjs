@@ -19,7 +19,7 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
   const {window}=new JSDOM('<body></body>',{url:base});
   for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
   window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
-  const {runner}=await import('../public/agent-client.js?v=0.8.0');
+  const {runner}=await import('../public/agent-client.js?v=0.9.0');
   runner.disconnect();runner.settings={};runner.storage=sessionStorage;runner.preferences=localStorage;
   const delivered=deferred(),release=deferred();let postJob,requestId,cancels=0;
   runner.fetcher=async(url,opts)=>{
@@ -32,9 +32,9 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
   };
   t.after(async()=>{release.resolve();if(postJob?.id){service.cancel(postJob.id);await service.jobs.get(postJob.id).done;}window.close();});
   const project={id:'cancel-'+kind,name:'취소 확인',description:'전송 중 취소',instructions:''},plan=createPlan(project),work=addNode(plan,plan.rootId,{title:'작업',instructions:'작업한다',criteria:'완료 기준'});
-  const {openConnections,openAgentReview}=await import('../public/agent-ui.js?v=0.8.0');
-  const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.8.0');
-  const {openOrganizer}=await import('../public/organize-ui.js?v=0.8.0');
+  const {openConnections,openAgentReview}=await import('../public/agent-ui.js?v=0.9.0');
+  const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.9.0');
+  const {openOrganizer}=await import('../public/organize-ui.js?v=0.9.0');
   const options={project,plan,onApply:()=>assert.fail('Cancelled response cannot be applied'),onClose(){}};
   if(kind==='probe')await openConnections();
   if(kind==='review')await openAgentReview(options);
@@ -47,10 +47,10 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
    const form=$('form');form.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
   }
   await delivered.promise;
-  const cancelSelector=kind==='probe'?'[data-ac="cancel-probe"]':kind==='review'?'[data-ac="cancel"]':kind==='questions'?'[data-dai="cancel"]':'[data-org="cancel"]';
-  const closeSelector=kind==='questions'?'[data-dai="close"]':kind==='organize'?'[data-org="close"]':'[data-ac="close"]';
+  const cancelSelector=kind==='probe'?'[data-ac="cancel-probe"]':kind==='review'?'[data-ac="cancel"]':'[data-lr="cancel"]';
+  const closeSelector=['questions','organize'].includes(kind)?'[data-lr="close"]':'[data-ac="close"]';
   await until(()=>$(cancelSelector));assert.equal($(cancelSelector).disabled,false,'cancel must be enabled before the POST response arrives');
-  if(mode==='lost'){await until(()=>document.body.textContent.includes('PC 실행기'));assert.equal($(closeSelector).disabled,true,'unknown request must not be silently abandoned');assert.equal(document.querySelector('[data-ac="reset"],[data-dai="reset"],[data-org="reset"]'),null);}
+  if(mode==='lost'){await until(()=>document.body.textContent.includes('PC 실행기'));assert.equal($(closeSelector).disabled,true,'unknown request must not be silently abandoned');assert.ok(!document.querySelector('[data-ac="reset"],[data-dai="reset"],[data-org="reset"],[data-lr="reset"]')||document.querySelector('[data-lr="reset"]')?.disabled);}
   $(cancelSelector).click();
   await until(()=>service.get(postJob.id)?.status==='cancelled'&&$(closeSelector)&&!$(closeSelector).disabled);
   assert.ok(cancels>0);assert.match(requestId,/^[\w-]{8,80}$/);
@@ -61,7 +61,7 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
 });
 
 test('cancelling while model metadata is loading prevents dispatch and stale polls cannot resurrect a cancelled job',async()=>{
- const {RunnerClient}=await import('../public/agent-client.js?v=0.8.0');
+ const {RunnerClient}=await import('../public/agent-client.js?v=0.9.0');
  const client=new RunnerClient({storage:null,preferences:null});client.base='http://127.0.0.1:4173';client.token='a'.repeat(64);client.runnerInfo={features:{unlimitedWait:true,requestCancellation:true,modelCapabilities:true}};
  const metadata=deferred();let posts=0;
  client.models=async()=>{await metadata.promise;return {};};

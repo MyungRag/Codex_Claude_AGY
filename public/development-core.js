@@ -126,7 +126,7 @@ export function planPartialRetry(tasks,{strategy,changedTaskIds=[]}={}){
  let blocked=true;
  while(blocked){blocked=false;for(const task of tasks){const entry=result.get(task.id);if(!['build','verify','analyze'].includes(entry.action))continue;
   const dependency=(task.dependsOn??[]).find(id=>{const parent=byId.get(id),plan=result.get(id);return plan.action==='wait'||plan.action==='analyze'||(plan.action==='keep'&&parent.status!=='passed');});
-  if(dependency){entry.action='wait';entry.reason=`선행 작업 ${dependency}의 미해결 조건을 먼저 확인해야 합니다.`;blocked=true;}
+  if(dependency){entry.action='wait';entry.reason=`선행 작업 ${byId.get(dependency)?.title||dependency}의 미해결 조건을 먼저 확인해야 합니다.`;blocked=true;}
  }}
  return tasks.map(task=>result.get(task.id));
 }

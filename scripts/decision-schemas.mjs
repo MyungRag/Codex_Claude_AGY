@@ -5,3 +5,8 @@ const withDecisionProperties=properties=>({...DECISIONS_SCHEMA,properties:{...DE
 export const QUESTIONS_SCHEMA=withDecisionProperties({type:{type:'string',enum:['question','verification','constraint']},relatedIds:{...strings,maxItems:0}});
 export const CONFLICTS_SCHEMA=withDecisionProperties({type:{type:'string',enum:['conflict']},relatedIds:{...strings,minItems:2,maxItems:20}});
 export const HANDOFF_SCHEMA={type:'object',additionalProperties:false,required:['summary','tasks'],properties:{summary:string,tasks:{type:'array',items:{type:'object',additionalProperties:false,required:['nodeId','agent','dependsOn','instructions','deliverable','criteria'],properties:{nodeId:string,agent:{type:'string',enum:['codex','claude','agy']},dependsOn:strings,instructions:string,deliverable:string,criteria:string}}}}};
+
+const recommendation={type:'object',additionalProperties:false,required:['kind','answer','reason','messageIds'],properties:{kind:{type:'string',enum:['assumption','user','unresolved']},answer:string,reason:string,messageIds:strings}};
+QUESTIONS_SCHEMA.properties.items.items.required=[...item.required,'recommendation'];
+QUESTIONS_SCHEMA.properties.items.items.properties.recommendation=recommendation;
+export const QUESTION_SYNTHESIS_SCHEMA={...QUESTIONS_SCHEMA,required:['summary','items','omitted'],properties:{...QUESTIONS_SCHEMA.properties,items:{type:'array',items:{...QUESTIONS_SCHEMA.properties.items.items,required:[...QUESTIONS_SCHEMA.properties.items.items.required,'existingIds','sourceRefs'],properties:{...QUESTIONS_SCHEMA.properties.items.items.properties,existingIds:strings,sourceRefs:strings}}},omitted:{type:'array',items:{type:'object',additionalProperties:false,required:['ref','reason'],properties:{ref:string,reason:string}}}}};

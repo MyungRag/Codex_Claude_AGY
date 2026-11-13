@@ -1,3 +1,4 @@
+import {browserChecks,parseBrowserChecks} from './browser-checks.mjs';
 import {createServer} from 'node:http';
 import {createServer as createNetServer} from 'node:net';
 import {spawn} from 'node:child_process';
@@ -172,9 +173,25 @@ export class DevelopmentWorkspace{
   const root=await this.root(workspace,{mutable:true});if(!Array.isArray(checks)||checks.length>30)fail('검사 설정이 올바르지 않습니다.');
   const sha=await this.git(root,['rev-parse','HEAD']),results=[],before=await sourceDigest(root,this.limits);
   for(const check of checks){checkAbort(signal);commandConfig(check);let result,error;
-   try{result=await this.run(await resolveDevelopmentCommand(check.command),check.args,{cwd:root,signal,timeout:0,maxBytes:256*1024,env:executionEnvironment(root)});if(await sourceDigest(root,this.limits)!==before||await this.git(root,['rev-parse','HEAD'])!==sha)error=new Error('검사 명령이 검토 대상 소스를 변경했습니다. 변경된 파일은 고정 커밋의 검사 결과로 인정할 수 없습니다.');}catch(cause){checkAbort(signal);error=cause;}
-   results.push({id:check.id||String(results.length+1),label:check.label||check.command,command:check.command,args:check.args,exitCode:result?.code??null,passed:!error&&result?.code===0,output:redact(error?.message||[result?.stdout,result?.stderr].filter(Boolean).join('\n')),codeSha:sha,at:new Date().toISOString()});
+   try{result=await this.run(await resolveDevelopmentCommand(check.command),check.args,{cwd:root,signal,timeout:check.automatic?30000:0,maxBytes:256*1024,env:executionEnvironment(root)});if(await sourceDigest(root,this.limits)!==before||await this.git(root,['rev-parse','HEAD'])!==sha)error=new Error('검사 명령이 검토 대상 소스를 변경했습니다. 변경된 파일은 고정 커밋의 검사 결과로 인정할 수 없습니다.');}catch(cause){checkAbort(signal);error=cause;}
+   results.push({id:check.id||String(results.length+1),label:check.label||check.command,command:check.command,args:check.args,exitCode:result?.code??(check.automatic&&error?.code==='AGENT_TIMEOUT'?1:null),passed:!error&&result?.code===0,output:redact(error?.message||[result?.stdout,result?.stderr].filter(Boolean).join('\n')),codeSha:sha,at:new Date().toISOString()});
   }
+  return results;
+ }
+ async automaticChecks(workspace,launch,{signal,nodeId}={}){
+  const root=await this.root(workspace,{mutable:true}),files=(await listFiles(root,this.limits)).files.map(f=>f.path),results=[];
+  if(files.includes('agent-desk.test.mjs'))results.push(...await this.check(workspace,[{id:'auto-unit',label:'기본 기능 검사 · Node.js',command:'node',args:['--test','agent-desk.test.mjs'],automatic:true}],{signal}));
+  if(launch.kind!=='static'||!files.includes(launch.entry)||!files.includes('agent-desk.checks.json'))return results;
+  const sha=await this.git(root,['rev-parse','HEAD']);let server;
+  try{
+   const manifest=await readFile(await safeFile(root,'agent-desk.checks.json'),'utf8');if(manifest.length>200000)throw new Error('브라우저 검사 정의가 너무 큽니다.');
+   const checks=parseBrowserChecks(JSON.parse(manifest)).filter(c=>!nodeId||!c.nodeIds.length||c.nodeIds.includes(nodeId));
+   if(!checks.length)return results;
+   server=await this.launch(root,launch,{signal});
+   const checked=await browserChecks(server.url,checks,{signal});
+   results.push(...checked.map((c,index)=>({...c,id:'auto-browser-'+index,command:'browser',args:[],codeSha:sha,at:new Date().toISOString()})));
+  }catch(error){checkAbort(signal);results.push({id:'auto-browser',label:'기본 화면 검사',command:'browser',args:[],passed:false,exitCode:error.unavailable?null:1,output:error.message,codeSha:sha,at:new Date().toISOString()});}
+  finally{await server?.stop();}
   return results;
  }
  async snapshot(workspace,{projectId,releaseId}={}){
@@ -182,10 +199,11 @@ export class DevelopmentWorkspace{
   await mkdir(path.dirname(destination),{recursive:true});if(await realpath(path.dirname(destination))!==path.dirname(destination))fail('릴리스 저장 경로에 심볼릭 링크가 있습니다.');await mkdir(destination);
   try{await copyTree(source,destination,this.limits);return destination;}catch(error){await rm(destination,{recursive:true,force:true});throw error;}
  }
- async packageRelease(releasePath,{limitations=[],launch={kind:'static',entry:'index.html'}}={}){
+ async packageRelease(releasePath,{limitations=[],launch={kind:'static',entry:'index.html'},trace=null}={}){
   const root=await this.root(releasePath),definition=launchDefinition(launch),inventory=await listFiles(root,this.limits),entries=[];
   for(const file of inventory.files)entries.push({name:file.path,body:await readFile(await safeFile(root,file.path))});
   const add=(name,text)=>entries.push({name,body:Buffer.from(text)});
+  if(trace)add('_agent_desk_decisions.json',JSON.stringify(trace,null,2));
   add('_agent_desk_launch.json',JSON.stringify(definition,null,2));
   add('_agent_desk_limitations.json',JSON.stringify({createdAt:new Date().toISOString(),limitations,excluded:inventory.excluded,verification:'실행 가능 상태와 독립 검토 통과 여부는 별도입니다. 이 패키지에 Node.js 또는 의존성은 포함되지 않습니다.'},null,2));
   add('_agent_desk_start.mjs',downloadLauncher());

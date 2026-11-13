@@ -59,6 +59,29 @@ test('changing a saved decision invalidates the affected completed task even whe
   assert.ok(agents.calls.some(call=>call.kind==='development-audit'&&call.payload.baseline.snapshot.items[0].answer==='USD'));
 });
 
+test('adopting a default releases dependent work after the prerequisite passes without bypassing its audit',async t=>{
+  const {runner,agents,input}=await fixture(t,call=>{
+    if(call.kind==='development-build')return call.payload.task.id==='dependent'?{summary:'Dependent feature',files:[{path:'dependent.txt',action:'write',content:'Uses the adopted currency'}],limitations:[]}:build();
+    if(call.kind!=='development-audit')return analysis();
+    if(call.payload.task.id==='page'&&!call.payload.baseline.snapshot.items[0].answer)return audit({verdict:'hold',findings:[issue({type:'spec',summary:'Currency is undecided'})]});
+    return audit({previousFindings:call.payload.previousFindings.map(f=>({id:f.id,status:'resolved',evidence:'The new baseline supplies the adopted currency; the host check passes.'}))});
+  });
+  input.config.limits.maxReviews=3;
+  Object.assign(input.baseline.snapshot.items[0],{status:'answer',answer:'',evidence:''});
+  input.baseline.snapshot.nodes.push({id:'dependent',title:'Dependent feature',description:'',instructions:'Use the page currency.',criteria:'Output exists'});
+  input.baseline.snapshot.edges.push({from:'goal',to:'dependent'});
+  input.handoff.tasks.push({nodeId:'dependent',agent:'codex',dependsOn:['page'],instructions:'Use the page currency.',deliverable:'Dependent file',criteria:'Output exists'});
+  const first=await finish(runner,input);
+  assert.equal(first.tasks.find(t=>t.id==='page').status,'limited');assert.equal(first.tasks.find(t=>t.id==='dependent').status,'blocked');
+  assert.equal(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='dependent'),false);
+  const changed=structuredClone(input);changed.requestId=randomUUID();changed.retry=true;changed.baseline.id='baseline-2';changed.baseline.number=2;changed.handoff.baselineId='baseline-2';
+  Object.assign(changed.baseline.snapshot.items[0],{status:'done',answer:'KRW',resolution:{kind:'assumption',agent:'codex',reason:'Project default',messageIds:[],at:new Date().toISOString()}});
+  const preview=await runner.preview(changed);assert.deepEqual(preview.entries.map(e=>e.action),['build','build']);
+  const selected=await runner.preview({...changed,selection:{taskIds:['page']}});assert.equal(selected.entries.find(e=>e.taskId==='dependent').action,'keep');
+  const second=await finish(runner,changed);assert.ok(second.tasks.every(t=>t.status==='passed'),JSON.stringify(second.tasks.map(t=>({id:t.id,status:t.status,error:t.error}))));
+  assert.ok(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='dependent'));
+});
+
 test('omitting an old finding from a later audit never silently resolves it',async t=>{
   let audits=0;
   const {runner,input}=await fixture(t,call=>call.kind==='development-build'?build():call.kind==='development-audit'?(++audits===1?audit({verdict:'fail',findings:[issue()]}):audit()):analysis());

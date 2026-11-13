@@ -15,6 +15,7 @@ if(args[0]==='app-server'||(agent==='claude'&&args.includes('--input-format'))){
  process.exit(0);
 }
 let prompt='';for await(const chunk of process.stdin)prompt+=chunk;
+if(agent==='agy'){try{prompt=JSON.parse(prompt).message.content;}catch{}}
 const selectedModel=args.includes('--model')?args[args.indexOf('--model')+1]:'fixture-claude',actualModel=selectedModel==='sonnet'?'claude-sonnet-5-5':selectedModel;
 if(agent==='claude'&&args.includes('--include-partial-messages')){
  console.log(JSON.stringify({type:'system',subtype:'init',model:actualModel}));
@@ -32,7 +33,14 @@ const schemaArg=args.includes('--output-schema')?args[args.indexOf('--output-sch
 const schema=JSON.parse(agent==='claude'?schemaArg:await readFile(schemaArg,'utf8'));
 if(schema.properties.items){
  const conflict=schema.properties.items.items.properties.type.enum.length===1&&schema.properties.items.items.properties.type.enum[0]==='conflict';
- delete output.nodes;output.items=[{type:conflict?'conflict':'question',nodeIds:['work-a'],relatedIds:conflict?['decision-a','decision-b']:prompt.includes('fixture:wrong-related-ids')?['work-a','invented-decision']:[],question:'어떤 가격을 비교할까요?',reason:'범위 확인',evidence:'사용자 확인 필요',options:[{label:'최종 가격',impact:'세금 포함'}],blocking:true}];
+ delete output.nodes;output.items=[{type:conflict?'conflict':'question',nodeIds:['work-a'],relatedIds:conflict?['decision-a','decision-b']:prompt.includes('fixture:wrong-related-ids')?['work-a','invented-decision']:[],question:'어떤 가격을 비교할까요?',reason:'범위 확인',evidence:'사용자 확인 필요',options:[{label:'최종 가격',impact:'세금 포함'}],blocking:true,...(!conflict?{recommendation:{kind:'assumption',answer:'최종 가격',reason:'비교 가능한 최소 기준',messageIds:[]}}:{})}];
+}
+if(schema.properties.omitted){
+ const read=label=>JSON.parse(prompt.split(label+': ')[1].split('\n')[0]);
+ const originals=read('반드시 보존하거나 병합할 기존 질문'),sources=read('독립 검토 제안');
+ output.items=originals.map(i=>({...i,existingIds:[i.id],sourceRefs:[],recommendation:i.recommendation||{kind:'unresolved',answer:'',reason:'기존 사용자 답변 유지',messageIds:[]}}));
+ for(const source of sources){let item=output.items.find(i=>i.question===source.item.question);if(!item){item={...source.item,existingIds:[],sourceRefs:[]};output.items.push(item);}item.sourceRefs.push(source.ref);}
+ output.omitted=[];
 }
 if(schema.properties.tasks){delete output.nodes;output.tasks=[{nodeId:'work-a',agent:'codex',dependsOn:[],instructions:'최종 가격을 비교한다',deliverable:'가격 비교 화면',criteria:'세금 포함 확인'}];}
 
