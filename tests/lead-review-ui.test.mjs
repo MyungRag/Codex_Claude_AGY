@@ -1,15 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {createPlan,addNode} from '../public/planning-model.js?v=0.9.2';
-import {applyQuestionSynthesis} from '../public/review-model.js?v=0.9.2';
+import {createPlan,addNode} from '../public/planning-model.js?v=0.9.3';
+import {applyQuestionSynthesis} from '../public/review-model.js?v=0.9.3';
 const until=async fn=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,5));}assert.fail('lead review did not finish');};
 
 test('the selected lead integrates three independent results, reuses them for chat, and restores user edits after a failed save',async t=>{
  const {window}=new JSDOM('<body></body>',{url:'https://agent-desk.test/'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){};window.HTMLDialogElement.prototype.close=function(){};
- const {runner}=await import('../public/agent-client.js?v=0.9.2');const original={startPending:runner.startPending,agents:runner.agents,runnerInfo:runner.runnerInfo,token:runner.token};
+ const {runner}=await import('../public/agent-client.js?v=0.9.3');const original={startPending:runner.startPending,agents:runner.agents,runnerInfo:runner.runnerInfo,token:runner.token};
  t.after(()=>{Object.assign(runner,original);window.close();});
  runner.agents=['codex','claude','agy'].map(id=>({id,available:true}));runner.runnerInfo={features:{leadReview:true}};runner.token='';
  const project={id:'lead-ui',name:'계산기',instructions:'',development:{lead:'codex'}},plan=createPlan(project),node=addNode(plan,plan.rootId,{title:'계산',criteria:'정확한 결과'}),calls=[];
@@ -20,7 +20,7 @@ test('the selected lead integrates three independent results, reuses them for ch
   const selected=prompt.includes('기본값은 RAD'),rec=selected?{kind:'user',answer:'RAD',reason:'사용자 추가 요구',messageIds:['review-input']}:proposal.recommendation;
   Object.assign(job,{id:'job-'+calls.length,status:'succeeded',result:kind==='questions-merge'?{summary:'주 AI 통합',items:[{...proposal,existingIds:[],sourceRefs:['codex-1','claude-1','agy-1'],recommendation:rec}],omitted:[]}:{summary:job.agent+' 독립 검토',items:[proposal]}});return job;
  };
- const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.9.2');let saved,fail=true;
+ const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.9.3');let saved,fail=true;
  const options={project,plan,kind:'questions',nodeIds:[node.id],onClose(){},onApply:async jobs=>{if(fail)throw new Error('저장 실패');const d=jobs[0].synthesis;saved=applyQuestionSynthesis(plan,d.nodeIds,d.jobs,d.result,d);}};
  await openDecisionAI(options);const $=s=>document.querySelector(s);
  const participant=$('[name=agents][value=agy]');participant.checked=false;participant.dispatchEvent(new window.Event('change',{bubbles:true}));
@@ -50,7 +50,7 @@ async function automaticReviewFixture(t,kind){
  const {window}=new JSDOM('<body></body>',{url:'https://agent-desk.test/'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){};window.HTMLDialogElement.prototype.close=function(){};
- const {runner}=await import('../public/agent-client.js?v=0.9.2'),{openLeadReview}=await import('../public/lead-review-ui.js?v=0.9.2');
+ const {runner}=await import('../public/agent-client.js?v=0.9.3'),{openLeadReview}=await import('../public/lead-review-ui.js?v=0.9.3');
  const original={startPending:runner.startPending,pollPending:runner.pollPending,cancelPending:runner.cancelPending,refresh:runner.refresh,agents:runner.agents,runnerInfo:runner.runnerInfo,token:runner.token};
  t.after(()=>{Object.assign(runner,original);window.close();});
  runner.agents=['codex','claude','agy'].map(id=>({id,available:true}));runner.runnerInfo={features:{leadReview:true}};runner.token='';
@@ -62,6 +62,22 @@ async function automaticReviewFixture(t,kind){
  const key=kind==='organize'?'agent-desk-organize-'+project.id:'agent-desk-decisions-'+project.id+'-questions';
  return {window,runner,calls,finish,key,options,open:()=>openLeadReview(options),applied:()=>applied,$:s=>document.querySelector(s)};
 }
+
+test('live status is visible without opening details and heartbeat never replaces controls or loses open panels',async t=>{
+ const f=await automaticReviewFixture(t,'organize'),{$,window,finish}=f;
+ let tick;window.setInterval=fn=>{tick=fn;return 1;};
+ await f.open();$('#lead-review-form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await until(()=>finish.size===3);
+ const panel=$('[data-job-activity]');assert.ok(panel);assert.equal(panel.closest('details'),null);assert.equal(panel.querySelectorAll('.job-activity').length,3);
+ const button=$('[data-lr="cancel"]');$('[data-review-originals]').open=true;tick();
+ assert.equal($('[data-lr="cancel"]'),button);assert.equal($('[data-review-originals]').open,true);
+ finish.get('auto-1')();await until(()=>$('[data-review-progress]').textContent.includes('1/3'));
+ assert.equal($('[data-review-originals]').open,true,'poll render keeps user-opened details');
+ finish.get('auto-2')();finish.get('auto-3')();await until(()=>finish.has('auto-4'));
+ assert.equal($('[data-job-activity]').querySelectorAll('.job-activity').length,1,'synthesis shows only the current lead');
+ finish.get('auto-4')();await until(()=>$('[data-lr="apply"]')&&!$('[data-lr="apply"]').disabled);
+ const input=$('[data-instruction]'),apply=$('[data-lr="apply"]');input.value='보존할 입력';input.dispatchEvent(new window.Event('input',{bubbles:true}));tick();
+ assert.equal($('[data-instruction]'),input);assert.equal(input.value,'보존할 입력');assert.equal($('[data-lr="apply"]'),apply);
+});
 
 for(const kind of ['questions','organize'])test(`${kind}: select the lead before starting and automatically synthesize after every independent review settles`,async t=>{
  const f=await automaticReviewFixture(t,kind),{$,window,calls,finish}=f;

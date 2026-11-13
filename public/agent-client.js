@@ -1,5 +1,5 @@
-import {validateSettings,assertCompatibleSettings} from './agent-settings.js?v=0.9.2';
-import {validatePromptSize,REVIEW_PROMPT_LIMIT} from './agent-limits.js?v=0.9.2';
+import {validateSettings,assertCompatibleSettings} from './agent-settings.js?v=0.9.3';
+import {validatePromptSize,REVIEW_PROMPT_LIMIT} from './agent-limits.js?v=0.9.3';
 export const AGENT_INFO=[
   {id:'codex',name:'Codex',short:'C',command:'codex login',docs:'https://developers.openai.com/codex/cli/'},
   {id:'claude',name:'Claude Code',short:'✳',command:'claude auth login',docs:'https://code.claude.com/docs/en/setup'},
@@ -14,7 +14,7 @@ export class RunnerClient{
   on(listener){this.listeners.add(listener);return()=>this.listeners.delete(listener);}
   async request(path,{method='GET',body,bootstrap=false,retrySession=true,timeoutMs=45000}={}){
     let response;try{response=await this.fetcher(this.base+path,{method,headers:{'X-Agent-Desk':'agent-runner',...(!bootstrap?{Authorization:'Bearer '+this.token}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),cache:'no-store',...(timeoutMs?{signal:AbortSignal.timeout(timeoutMs)}:{})});}catch{throw new Error('PC 실행기에 접속하지 못했습니다. start-windows.cmd 실행, 주소, 브라우저의 로컬 네트워크 접근 권한을 확인해 주세요.');}
-    let data;try{data=await response.json();}catch{throw new Error('이 주소에 최신 PC 실행기가 없습니다. 다운로드한 v0.9.2 실행기를 시작해 주세요.');}
+    let data;try{data=await response.json();}catch{throw new Error('이 주소에 최신 PC 실행기가 없습니다. 다운로드한 v0.9.3 실행기를 시작해 주세요.');}
     if(response.status===401&&!bootstrap&&retrySession&&isLocal()&&this.base===location.origin){
       const session=await this.request('/api/agents/session',{bootstrap:true});
       if(!/^[a-f0-9]{64}$/.test(session.token||''))throw new Error('실행기 연결을 다시 확인해 주세요.');
@@ -29,17 +29,17 @@ export class RunnerClient{
   disconnect(){this.catalogs={};this.usage=null;this.base='';this.token='';this.agents=[];this.runnerInfo=null;this.lastProbe=null;try{this.storage?.removeItem('agent-desk-runner');}catch{}this.emit();}
   getSettings(agent){return this.settings[agent]||{model:'',effort:''};}
   saveSettings(agent,settings){const next=assertCompatibleSettings(agent,validateSettings(agent,settings),this.catalogs[agent]);const all={...this.settings,[agent]:next};this.preferences?.setItem('agent-desk-models',JSON.stringify(all));this.settings=all;this.emit();return next;}
-  requireFeature(feature){if(!this.runnerInfo?.features?.[feature])throw new Error('이 기능은 PC 실행기 v0.9.2 이상이 필요합니다. 최신 ZIP으로 실행기를 교체해 주세요.');}
+  requireFeature(feature){if(!this.runnerInfo?.features?.[feature])throw new Error('이 기능은 PC 실행기 v0.9.3 이상이 필요합니다. 최신 ZIP으로 실행기를 교체해 주세요.');}
   async models(agent){this.requireFeature('modelCapabilities');const catalog=await this.request('/api/agents/models/'+agent);this.catalogs[agent]=catalog;return catalog;}
   async refreshUsage(){if(!this.runnerInfo?.features?.usage)return;this.usage=await this.request('/api/agents/usage');this.emit();}
   async start(agent,prompt,kind='review',settings=this.getSettings(agent),{requestId=crypto.randomUUID(),cancelled=()=>false}={}){validatePromptSize(prompt,kind);settings=validateSettings(agent,settings);if(!settings.waitMinutes)this.requireFeature('unlimitedWait');else if(settings.waitMinutes!==5)this.requireFeature('requestTiming');if(settings.model||settings.effort)this.requireFeature('modelCapabilities');if(settings.effort&&!this.catalogs[agent])await this.models(agent);if(cancelled())return {agent,kind,requestId,status:'cancelled'};assertCompatibleSettings(agent,settings,this.catalogs[agent]);if(['questions-merge','organize-merge'].includes(kind))this.requireFeature('leadReview');if(kind==='organize-merge'||prompt.length>REVIEW_PROMPT_LIMIT)this.requireFeature('largeReviewContext');if(['organize','organize-merge'].includes(kind))this.requireFeature('organize');if(['questions','conflicts','handoff'].includes(kind))this.requireFeature('planningDecisions');return this.request('/api/agents/jobs',{method:'POST',body:{agent,prompt,kind,settings,requestId}}).catch(error=>{if(!error.status)error.jobMayExist=true;throw error;});}
-  async poll(id,update=()=>{},{stop=()=>null,refreshInBackground=false}={}){while(true){const stopped=stop();if(stopped)return stopped;const job=await this.request('/api/agents/jobs/'+id);const cancelled=stop();if(cancelled)return cancelled;update(job);if(job.status!=='running'){if(job.status!=='cancelled'&&job.settled===false){await delay(50);continue;}if(job.status==='succeeded'&&job.kind==='probe'&&this.runnerInfo?.features?.modelCapabilities){try{await this.models(job.agent);}catch(error){job.catalogWarning=error.message;}}if(refreshInBackground)void this.refresh().catch(()=>{});else try{await this.refresh();}catch{}return job;}await delay(1000);}}
+  async poll(id,update=()=>{},{stop=()=>null,refreshInBackground=false}={}){while(true){const stopped=stop();if(stopped)return stopped;const job=await this.request('/api/agents/jobs/'+id);job.lastCheckedAt=new Date().toISOString();const cancelled=stop();if(cancelled)return cancelled;update(job);if(job.status!=='running'){if(job.status!=='cancelled'&&job.settled===false){await delay(50);continue;}if(job.status==='succeeded'&&job.kind==='probe'&&this.runnerInfo?.features?.modelCapabilities){try{await this.models(job.agent);}catch(error){job.catalogWarning=error.message;}}if(refreshInBackground)void this.refresh().catch(()=>{});else try{await this.refresh();}catch{}return job;}await delay(1000);}}
   waitForCancellation(job,work){let finish;const cancelled=new Promise(resolve=>{finish=resolve;}),waiters=this.cancelWaiters.get(job)||new Set();waiters.add(finish);this.cancelWaiters.set(job,waiters);return Promise.race([work,cancelled]).finally(()=>{waiters.delete(finish);if(!waiters.size)this.cancelWaiters.delete(job);});}
   async startPending(job,prompt,kind='review',settings=this.getSettings(job.agent)){
-    job.requestId||=crypto.randomUUID();if(job.cancelRequested)return job;this.requireFeature('requestCancellation');
+    job.requestId||=crypto.randomUUID();job.requestedAt||=new Date().toISOString();if(job.cancelRequested)return job;this.requireFeature('requestCancellation');
     return this.waitForCancellation(job,(async()=>{const result=await this.start(job.agent,prompt,kind,settings,{requestId:job.requestId,cancelled:()=>job.cancelRequested});
       if(job.cancelRequested&&result.status==='running'){job.id=result.id;return this.cancelPending(job);}
-      Object.assign(job,result);return job;
+      Object.assign(job,result,{lastCheckedAt:new Date().toISOString()});return job;
     })());
   }
   async pollPending(job,update=()=>{},{refreshInBackground=false}={}){if(job.status==='cancelled')return job;return this.waitForCancellation(job,this.poll(job.id,value=>{Object.assign(job,value);update(job);},{stop:()=>job.cancelRequested&&job.status==='cancelled'?job:null,refreshInBackground}).then(result=>{Object.assign(job,result);return job;}));}
@@ -54,4 +54,4 @@ export class RunnerClient{
 }
 export const runner=new RunnerClient();
 
-export function connectionReport(client=runner){return JSON.stringify({dashboardVersion:'0.9.2',runner:client.runnerInfo,agents:client.agents.map(({id,state,stage,code,version,missingFlags,verified})=>({id,state,stage,code,version,missingFlags,verified:!!verified})),lastProbe:client.lastProbe},null,2);}
+export function connectionReport(client=runner){return JSON.stringify({dashboardVersion:'0.9.3',runner:client.runnerInfo,agents:client.agents.map(({id,state,stage,code,version,missingFlags,verified})=>({id,state,stage,code,version,missingFlags,verified:!!verified})),lastProbe:client.lastProbe},null,2);}

@@ -1,7 +1,7 @@
-import {STRATEGIES,defaultDevelopment,validateDevelopment} from './development-core.js?v=0.9.2';
-import {developmentClient,parseArguments,localProgramURL} from './development-client.js?v=0.9.2';
-import {openConnections} from './agent-ui.js?v=0.9.2';
-import {executionOrder} from './execution-order.js?v=0.9.2';
+import {STRATEGIES,defaultDevelopment,validateDevelopment} from './development-core.js?v=0.9.3';
+import {developmentClient,parseArguments,localProgramURL} from './development-client.js?v=0.9.3';
+import {openConnections} from './agent-ui.js?v=0.9.3';
+import {executionOrder} from './execution-order.js?v=0.9.3';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone=value=>JSON.parse(JSON.stringify(value));

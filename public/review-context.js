@@ -1,4 +1,4 @@
-import {semanticNode} from './decision-core.js?v=0.9.2';
+import {semanticNode} from './decision-core.js?v=0.9.3';
 
 // Preserve current requirements, options, answers and every user message in full.
 // Old AI prose, duplicate source copies, answer history and canvas layout remain

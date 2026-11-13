@@ -15,7 +15,7 @@ test('saved unsupported Max is visible but cannot run; default probe automatical
  t.after(async()=>{window.close();globalThis.fetch=nativeFetch;await service.close();await new Promise(r=>server.close(r));});
  window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
  localStorage.setItem('agent-desk-models',JSON.stringify({agy:{model:'',effort:'max'},claude:{model:'opus',effort:'max'}}));
- const {openConnections}=await import('../public/agent-ui.js?v=0.9.2');await openConnections();
+ const {openConnections}=await import('../public/agent-ui.js?v=0.9.3');await openConnections();
  const $=s=>document.querySelector(s),click=s=>$(s).click(),change=(s,value)=>{$(s).value=value;$(s).dispatchEvent(new window.Event('change',{bubbles:true}));};
  const efforts=agent=>[...$(`[data-effort-select="${agent}"]`).options].filter(o=>!o.disabled).map(o=>o.value);
  assert.ok($('[data-effort-select="agy"] option[value="max"]').disabled);

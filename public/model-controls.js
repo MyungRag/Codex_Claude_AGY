@@ -1,5 +1,6 @@
-import {runner,AGENT_INFO} from './agent-client.js?v=0.9.2';
-import {MODEL_PRESETS,EFFORT_LABELS,settingLabel,formatTokens,modelCapability,supportedEfforts,settingsIssue} from './agent-settings.js?v=0.9.2';
+import {jobActivityState} from './progress-model.js?v=0.9.3';
+import {runner,AGENT_INFO} from './agent-client.js?v=0.9.3';
+import {MODEL_PRESETS,EFFORT_LABELS,settingLabel,formatTokens,modelCapability,supportedEfforts,settingsIssue} from './agent-settings.js?v=0.9.3';
 export const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function effortOptions(agent,settings,catalog){
  const efforts=supportedEfforts(agent,settings,catalog),invalid=settings.effort&&!efforts.includes(settings.effort);
@@ -48,11 +49,17 @@ export function usageDashboard(){return `<section class="usage-dashboard"><heade
 export function jobProgressText(job){
  if(!job.startedAt)return job.status==='running'?'CLI 실행 준비 중…':'';
  const seconds=Math.floor((job.elapsedMs||0)/1000),elapsed=Math.floor(seconds/60)+'분 '+seconds%60+'초';
- const phase={starting:'CLI 첫 이벤트 대기',initialized:'CLI 초기화 확인 · 모델 응답 대기',receiving:'응답 이벤트 수신 중',result:'최종 응답 수신'}[job.progress?.phase]||'응답 대기';
+ const phase={starting:'CLI 첫 이벤트 대기',initialized:'CLI 초기화 확인 · 모델 응답 대기',processing:'AI 요청 처리 이벤트 수신',error:'CLI 오류 이벤트 수신',receiving:'응답 이벤트 수신 중',result:'최종 응답 수신'}[job.progress?.phase]||'응답 대기';
  const last=job.progress?.lastActivityAt?' · 최근 이벤트 '+new Date(job.progress.lastActivityAt).toLocaleTimeString('ko-KR'):'';
  return `${phase} · 경과 ${elapsed} / ${job.timeoutMs>0?'최대 '+Math.round(job.timeoutMs/60000)+'분':'대기 무제한'}${last}`;
 }
 export function jobMetadataHTML(job){
  const selected=job.modelInfo?.name?job.modelInfo.name+' · '+(EFFORT_LABELS[job.settings?.effort||'']||job.settings?.effort):settingLabel(job.settings);
  return `<div class="job-model"><span>요청 모델: ${esc(selected)}</span>${job.modelInfo?`<span>CLI 선택값: ${esc(job.settings?.model||'기본값')}${job.modelInfo.resolvedModel?' · 해석 모델: '+esc(job.modelInfo.resolvedModel):''}</span>`:''}${job.actualModel?`<span>CLI 보고 모델: ${esc(job.actualModel)}</span>`:''}<span class="job-progress">${esc(jobProgressText(job))}</span></div>${usageHTML(job.usage)}`;
+}
+
+export function jobActivityHTML(job){
+ const view=jobActivityState(job),name=AGENT_INFO.find(a=>a.id===job.agent)?.name||job.agent;
+ const size=view.bytes<1024?view.bytes+' B':(view.bytes/1024).toFixed(1)+' KB';
+ return `<article class="job-activity" data-activity-state="${view.state}"><header><strong>${esc(name)}</strong><span>${esc(view.title)}</span></header><dl><div><dt>경과 시간</dt><dd>${esc(view.elapsed)}</dd></div><div><dt>실행기 연결</dt><dd>${esc(view.connection)} · ${esc(view.checked)}</dd></div><div><dt>AI 프로그램</dt><dd>${esc(view.process)}</dd></div><div><dt>최근 출력 수신</dt><dd>${esc(view.output)}</dd></div></dl><p>${esc(view.note)}</p><small>출력 수신량 ${size} · 최대 대기 ${esc(view.limit)} · 실행기 연결 확인은 AI 출력 수신과 별개입니다.</small></article>`;
 }

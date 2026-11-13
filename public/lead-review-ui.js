@@ -1,6 +1,7 @@
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.2';
-import {esc,jobMetadataHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.9.2';
-import {decisionTypes} from './decision-core.js?v=0.9.2';
+import {jobActivityState} from './progress-model.js?v=0.9.3';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.3';
+import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.9.3';
+import {decisionTypes} from './decision-core.js?v=0.9.3';
 
 const label=id=>AGENT_INFO.find(a=>a.id===id)?.name||id;
 const live=job=>job&&['running','unknown'].includes(job.status);
@@ -15,15 +16,16 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  try{const saved=JSON.parse(sessionStorage.getItem(key)||'null');if(saved?.version===1){pending=saved;pending.autoMerge??=!saved.merge&&saved.jobs.some(live)&&!saved.jobs.some(j=>j.status==='cancelled'||j.cancelRequested);}}catch{}
  pending.participants||=AGENT_INFO.map(a=>a.id);
  pending.settings||=Object.fromEntries(AGENT_INFO.map(a=>[a.id,runner.getSettings(a.id)]));
- const el=document.createElement('dialog');el.className='agent-dialog agent-dialog-wide';
+ const el=document.createElement('dialog');el.className='agent-dialog agent-dialog-wide';let heartbeat=null;
  const save=()=>{try{sessionStorage.setItem(key,JSON.stringify(pending));}catch{error='검토 임시 저장 공간이 부족합니다. 반영할 때까지 창을 닫지 마세요.';}};
  const allJobs=()=>[...pending.jobs,...(pending.merge?[pending.merge]:[])];
  const active=()=>allJobs().some(live);
+ const activityJobs=()=>live(pending.merge)?[pending.merge]:pending.jobs.some(live)?pending.jobs:[];
  const selected=()=>pending.jobs.filter(j=>j.status==='succeeded'&&j.include!==false);
  const fingerprint=()=>JSON.stringify({lead:pending.lead,instruction:pending.instruction,ids:selected().map(j=>j.id)});
  const ready=()=>pending.merge?.status==='succeeded'&&!pending.merge.validationError&&pending.mergeKey===fingerprint();
  const mergeFailed=()=>pending.merge?.status==='failed'||!!pending.merge?.validationError;
- const close=()=>{if(busy||active())return;el.close();el.remove();onClose();};
+ const close=()=>{if(busy||active())return;window.clearInterval(heartbeat);el.close();el.remove();onClose();};
  const getResult=()=>{if(plan.changeNumber!==pending.baseChange)throw new Error('기획이 변경되었습니다. 현재 기획으로 새 검토를 요청해 주세요.');return validate(pending.merge.result,selected(),pending.mergeInstruction,pending.nodeIds);};
  const answerPreview=result=>result.items.map((item,index)=>{
   const previous=item.existingIds.map(id=>plan.items.find(i=>i.id===id)).find(i=>i?.answer),rec=item.recommendation,edit=pending.edits[index];
@@ -31,6 +33,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  }).join('')+(result.omitted.length?`<details><summary>통합에서 제외한 제안 ${result.omitted.length}개</summary>${result.omitted.map(o=>`<p>${esc(o.ref)} · ${esc(o.reason)}</p>`).join('')}</details>`:'');
  const reviewProgress=()=>{
   if(allJobs().some(j=>j.status==='unknown'))return '연결 상태를 확인해야 합니다. 상태를 다시 확인하면 진행 중이던 검토를 이어갑니다.';
+  if(activityJobs().some(j=>jobActivityState(j).state==='unknown'))return '실행기 연결 확인이 지연되고 있습니다. 현재 요청의 상태를 확인하고 있습니다.';
   if(live(pending.merge))return `2/2 · 주 AI ${label(pending.lead)}가 통합 중입니다. 완료되면 통합안을 확인할 수 있습니다.`;
   if(pending.autoMerge&&!pending.merge)return `1/2 · 독립 검토 ${pending.jobs.filter(j=>!live(j)).length}/${pending.jobs.length}개 처리 완료. 끝나면 주 AI ${label(pending.lead)}가 자동으로 통합합니다. 중간에 버튼을 누를 필요가 없습니다.`;
   if(ready())return '검토·통합 완료 · 아래 통합안을 확인한 뒤 반영하세요.';
@@ -43,6 +46,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  const originals=()=>`<details data-review-originals><summary>독립 검토 원본 보기 · ${pending.jobs.length}개 AI · 선택 사항</summary>${pending.jobs.map(j=>`<article><h3>${esc(label(j.agent))} · ${esc({succeeded:'응답 도착',running:'검토 중',unknown:'상태 확인 필요',failed:'응답 실패',cancelled:'취소됨'}[j.status]||j.status)}</h3>${jobMetadataHTML(j)}${j.status==='succeeded'?`<label><input type="checkbox" data-include="${j.agent}" ${j.include===false?'':'checked'} ${busy||active()?'disabled':''}> 통합에 포함</label><pre class="context-preview">${esc(JSON.stringify(j.result,null,2))}</pre>`:`<p>${esc(j.error||'')}</p>`}</article>`).join('')}</details>`;
  const render=()=>{
   if(!el.isConnected)return;
+  const panels=['data-review-originals','data-review-adjust','data-review-restart','data-review-metadata','data-review-history'],opened=panels.filter(key=>el.querySelector('['+key+']')?.open);
   const working=busy||active(),hasJobs=pending.jobs.length>0;
   el.innerHTML=`<header><div><span class="eyebrow">REVIEW → LEAD → APPLY</span><h2>${kind==='organize'?'AI로 노드 정리':'AI로 질문 검토'} · 주 AI 통합</h2></div><button class="small-icon" data-lr="close" ${working?'disabled':''}>✕</button></header>
    <div class="agent-dialog-body"><p>${esc(project.name)} · 각 AI가 독립 검토한 뒤 주 AI가 하나로 정리합니다.</p>
@@ -50,17 +54,19 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
    <p class="agent-error" role="status" tabindex="-1">${esc(error||pending.merge?.validationError||pending.merge?.error||'')}</p>
    ${hasJobs?`
     ${working?leadControls():''}
+    <section data-job-activity aria-label="현재 AI 진행 상태">${activityJobs().map(jobActivityHTML).join('')}</section>
     <div class="review-actions">${!working&&!ready()?mergeButton():''}${active()?'<button class="button" data-lr="cancel">요청 취소</button>':''}${allJobs().some(j=>j.status==='unknown')?`<button class="button" data-lr="recover" ${busy?'disabled':''}>상태 다시 확인</button>`:''}</div>
     ${ready()?finalPreview():''}
     ${!working?`<details data-review-adjust><summary>추가 요구·주 AI 변경 · 필요할 때만</summary>${leadControls()}${ready()?mergeButton():''}</details>`:''}
-    ${pending.merge?.startedAt?`<details><summary>주 AI 요청 정보</summary>${jobMetadataHTML(pending.merge)}</details>`:''}
+    ${pending.merge?.startedAt?`<details data-review-metadata><summary>주 AI 요청 정보</summary>${jobMetadataHTML(pending.merge)}</details>`:''}
     ${originals()}
     ${!working?'<details data-review-restart><summary>독립 검토부터 새로 시작 · 기존 응답 교체</summary><p>현재 기획으로 참여 AI 모두에게 새로 요청합니다. 통합만 실패했다면 위의 기존 응답 재시도를 사용하세요.</p><button class="button" data-lr="reset">현재 기획으로 새 검토</button></details>':''}
    `:`${leadControls()}<form id="lead-review-form"><fieldset class="review-agent-picks"><legend>독립 검토에 참여할 AI</legend>${AGENT_INFO.map(a=>`<label><input type="checkbox" name="agents" value="${a.id}" ${runner.agents.find(s=>s.id===a.id)?.available?(pending.participants.includes(a.id)?'checked':''):'disabled'}>${a.name}</label>`).join('')}</fieldset><details><summary>이번 검토의 모델·추론 설정</summary>${AGENT_INFO.map(a=>`<h4>${a.name}</h4>${modelControls(a.id,pending.settings[a.id],{busy})}`).join('')}</details><p class="helper">AI 연결의 모델 설정을 기본으로 사용합니다. 여기서 바꾼 값은 이번 독립 검토와 주 AI 통합에 적용됩니다. 시작 전에 주 AI를 선택하면 독립 검토 후 자동으로 한 번 더 호출합니다. 중간 조작 없이 통합안까지 만들어 드립니다.</p><button class="button primary" ${busy?'disabled':''}>검토 시작 · 주 AI 통합까지 자동 진행</button></form>`}
-   ${(plan.reviewHistory||[]).filter(r=>r.kind===kind).length?`<details><summary>이전 통합 검토 기록</summary>${plan.reviewHistory.filter(r=>r.kind===kind).map(r=>`<article><strong>${esc(label(r.lead))} · ${esc(r.at)}</strong><p>${esc(r.summary)}</p><p>${esc(r.instruction)}</p><details><summary>AI별 원본</summary><pre class="context-preview">${esc(r.payload)}</pre></details></article>`).join('')}</details>`:''}</div>`;
+   ${(plan.reviewHistory||[]).filter(r=>r.kind===kind).length?`<details data-review-history><summary>이전 통합 검토 기록</summary>${plan.reviewHistory.filter(r=>r.kind===kind).map(r=>`<article><strong>${esc(label(r.lead))} · ${esc(r.at)}</strong><p>${esc(r.summary)}</p><p>${esc(r.instruction)}</p><details><summary>AI별 원본</summary><pre class="context-preview">${esc(r.payload)}</pre></details></article>`).join('')}</details>`:''}</div>`;
+  for(const key of opened){const panel=el.querySelector('['+key+']');if(panel)panel.open=true;}
  };
- const poll=async job=>{try{await runner.pollPending(job,()=>render(),{refreshInBackground:true});}catch(e){job.status=e.status===404?'failed':'unknown';job.error=e.message;}save();render();};
- const start=async(job,content,jobKind)=>{try{if(!runner.runnerInfo)await runner.refresh();await runner.startPending(job,content,jobKind,pending.settings[job.agent]);save();render();if(job.id&&job.status==='running')await poll(job);}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;job.errorCode=e.code;}save();render();};
+ const poll=async job=>{try{await runner.pollPending(job,()=>{job.lastCheckedAt=new Date().toISOString();render();},{refreshInBackground:true});}catch(e){job.status=e.status===404?'failed':'unknown';job.error=e.message;}save();render();};
+ const start=async(job,content,jobKind)=>{job.requestedAt||=new Date().toISOString();try{if(!runner.runnerInfo)await runner.refresh();await runner.startPending(job,content,jobKind,pending.settings[job.agent]);job.lastCheckedAt=new Date().toISOString();save();render();if(job.id&&job.status==='running')await poll(job);}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;job.errorCode=e.code;}save();render();};
  const merge=async()=>{
   if(cancelled||active()||!selected().length)return;
   if(plan.changeNumber!==pending.baseChange)throw new Error('기획이 변경되었습니다. 현재 기획으로 새 검토를 요청해 주세요.');
@@ -90,6 +96,8 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
   if(action==='apply'&&ready())void run(async()=>{getResult();await onApply({result:pending.merge.result,jobs:selected(),id:pending.merge.id,lead:pending.lead,instruction:pending.mergeInstruction,edits:pending.edits,nodeIds:pending.nodeIds,baseChange:pending.baseChange});sessionStorage.removeItem(key);busy=false;close();});
  });
  document.body.append(el);render();el.showModal();
+ // Update only the read-only status panel. Never replace input fields or buttons on timer ticks.
+ heartbeat=window.setInterval(()=>{if(!el.isConnected){window.clearInterval(heartbeat);return;}const panel=el.querySelector('[data-job-activity]');if(panel)panel.innerHTML=activityJobs().map(jobActivityHTML).join('');const summary=el.querySelector('[data-review-progress] strong');if(summary&&summary.textContent!==reviewProgress())summary.textContent=reviewProgress();},1000);
  // Do not refresh CLI availability on a restored completed result; it can be saved immediately.
  if(pending.jobs.length){await run(async()=>{for(const job of allJobs().filter(j=>live(j)&&!j.id)){try{await runner.cancelPending(job);}catch(e){job.status='unknown';job.error=e.message;}}await Promise.all(allJobs().filter(j=>j.id&&live(j)).map(poll));await continueAutomatically();if(pending.merge?.status==='succeeded')validateCompleted();});}
  else await run(async()=>{if(isLocal())await runner.connect(location.origin,'',{local:true});else if(runner.token)await runner.refresh();});

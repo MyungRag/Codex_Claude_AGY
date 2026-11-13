@@ -22,6 +22,12 @@ if(agent==='claude'&&args.includes('--include-partial-messages')){
  console.log(JSON.stringify({type:'stream_event',event:{type:'content_block_delta',delta:{type:'thinking_delta',thinking:'private reasoning MUST-NOT-LEAK'}}}));
 }
 
+if(prompt.includes('fixture:progress-hang')){
+ if(agent==='codex')for(const event of [{type:'thread.started'},{type:'turn.started'},{type:'item.updated',item:{type:'reasoning',text:'PRIVATE-STDOUT'}}])console.log(JSON.stringify(event));
+ if(agent==='agy')for(const event of [{event:'init',init:{model:'fixture-agy'}},{event:'message',content:'PRIVATE-STDOUT'}])console.log(JSON.stringify(event));
+ console.error('PRIVATE-STDERR');
+ await new Promise(()=>setInterval(()=>{},1000));
+}
 if(prompt.includes('fixture:slow'))await new Promise(r=>setTimeout(r,1500));
 if(prompt.includes('fixture:hang'))await new Promise(()=>setInterval(()=>{},1000));
 if(prompt.includes('fixture:quota')){console.error('quota 429');process.exit(1);}
