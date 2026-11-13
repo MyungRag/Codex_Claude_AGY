@@ -54,11 +54,14 @@ export async function handleDecisionClick(host,event){
   if(kind==='conflicts'&&p.items.filter(i=>i.status==='done'&&i.type!=='conflict').length<2){host.toast('확정된 결정이 두 개 이상일 때 충돌을 검토할 수 있습니다.');return true;}
   if(kind==='handoff'&&(!base||!readiness(host.project,p).current||base.id!==p.baselines.at(-1).id)){host.toast('현재 기획을 먼저 확정해 주세요.');return true;}
   const prompt=kind==='handoff'?`한국어로 확정 기획의 모든 실행 작업 노드(전체 목표와 nodeType=group 제외)에 담당 AI(codex, claude, agy), 선행 작업, 구체적인 업무 지시, 기대 결과와 완료 기준을 제안하세요. 작업은 실행하지 마세요. 사용자 결정과 제약을 반드시 따르세요. 답변 필요·확인 필요 상태의 항목은 아직 확정되지 않았습니다. 미답변을 임의로 결정하지 말고 관련 작업의 업무 지시에 남은 확인 사항을 명시하세요. 노드 계층 자체를 실행 순서로 단정하지 마세요. 실행 작업만 한 번씩 tasks에 포함하고 그룹은 포함하지 마세요. 확정본의 dependsOn 선행 관계와 order 우선순위, functionSteps를 존중하세요. 필요한 선행 작업을 임의로 지우지 마세요. summary와 tasks JSON으로 반환하세요. 확정 기획: ${JSON.stringify(base.snapshot)}`:decisionPrompt(host.project,p,kind,nodeIds);
-  host.agentDialogOpen=true;await openDecisionAI({project:host.project,plan:p,kind,nodeIds,prompt,onClose:()=>{host.agentDialogOpen=false;},onApply:async(jobs,baseChange,reviewed)=>{
+  host.agentDialogOpen=true;await openDecisionAI({project:host.project,plan:p,kind,nodeIds,prompt,onClose:()=>{host.agentDialogOpen=false;},getApplyDiagnostics:()=>({saving:host.saving,stale:host.stale,currentChange:host.plan.changeNumber}),onApply:async(jobs,baseChange,reviewed,reportPhase=()=>{})=>{
+   reportPhase('validating-plan');
    if(host.stale||host.plan.changeNumber!==baseChange)throw new Error('요청 후 기획이 변경되었습니다. 현재 기획으로 다시 검토해 주세요.');
+   reportPhase('building-plan');
    let next;if(kind==='handoff')next=saveAssignments(host.plan,base.id,jobs[0].result.tasks,jobs[0].agent);else next=applyDecisionReviews(host.plan,jobs,reviewed,kind);
    const previous=new Map(host.plan.items.map(item=>[item.id,item]));
    const added=next.items.filter(item=>!previous.has(item.id)),updated=next.items.filter(item=>previous.has(item.id)&&JSON.stringify(item)!==JSON.stringify(previous.get(item.id)));
+   reportPhase('saving-plan');
    if(!await host.persist(next,()=>{
     s.newItem=false;
     if(kind==='handoff'){host.toast('AI 업무 분담안을 저장했습니다. 편집 후 분담서를 내려받으세요.');return;}

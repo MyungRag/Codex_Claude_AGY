@@ -19,8 +19,8 @@ async function setup(t){
  project.planning=createPlan(project);
  const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',criteria:'최종 가격 표시'});
  const other=addNode(project.planning,project.planning.rootId,{title:'예약',criteria:'예약 완료 표시'});
- let saved=structuredClone(project.planning),failSave=false;const messages=[];
- const host=mountPlanner(document.querySelector('main'),{project,revision:0,icon:()=>'',toast:m=>messages.push(m),exportProject(){},save:async(next,revision)=>{if(failSave)throw new Error('저장 실패');saved=validatePlan(next);return revision+1;}});
+ let saved=structuredClone(project.planning),failSave=false,saveGate=null;const messages=[];
+ const host=mountPlanner(document.querySelector('main'),{project,revision:0,icon:()=>'',toast:m=>messages.push(m),exportProject(){},save:async(next,revision)=>{if(failSave)throw new Error('저장 실패');if(saveGate)await saveGate;saved=validatePlan(next);return revision+1;}});
  host.page='decisions';host.render();
  t.after(()=>{host.destroy();window.close();});
  const key='agent-desk-decisions-'+project.id+'-questions';
@@ -29,7 +29,7 @@ async function setup(t){
   await handleDecisionClick(host,{target:document.querySelector('[data-dec="ai-questions"]'),preventDefault(){}});
  };
  const apply=async()=>{document.querySelector('[data-dai="apply"]').click();await until(()=>!document.querySelector('.agent-dialog'));};
- return {host,work,other,open,apply,key,messages,saved:()=>saved,failSave:value=>{failSave=value;}};
+ return {host,work,other,open,apply,key,messages,saved:()=>saved,failSave:value=>{failSave=value;},holdSave:promise=>{saveGate=promise;}};
 }
 
 test('applying constraints opens the saved item in the check tab and preserves it after serialization',async t=>{
@@ -104,6 +104,33 @@ test('failed persistence preserves the review and selection for retry',async t=>
  assert.deepEqual(ctx.host.decisionState,before);assert.equal(ctx.saved().items.length,0);
  assert.ok(sessionStorage.getItem(ctx.key));ctx.failSave(false);await ctx.apply();
  assert.equal(ctx.saved().items.length,1);assert.equal(sessionStorage.getItem(ctx.key),null);
+});
+
+test('in-dialog diagnostics identify a pending save without including project or review content',async t=>{
+ const ctx=await setup(t);let finishSave;
+ ctx.holdSave(new Promise(resolve=>{finishSave=resolve;}));t.after(()=>finishSave());
+ await ctx.open([job('pending-save-run',[proposal(ctx.work.id,'constraint','비공개 질문 내용')])]);
+ document.querySelector('[data-dai="apply"]').click();await until(()=>ctx.host.saving);
+ assert.ok(document.querySelector('.agent-dialog'));
+ const details=document.querySelector('.decision-diagnostics');details.open=true;
+ details.dispatchEvent(new window.Event('toggle'));
+ const text=document.querySelector('[data-dai-diagnostics]').value,report=JSON.parse(text);
+ assert.equal(report.build,'decision-apply-diagnostics3');assert.equal(report.applyClicks,1);
+ assert.equal(report.applyPhase,'saving-plan');assert.equal(report.busy,true);assert.equal(report.host.saving,true);
+ assert.deepEqual(report.jobs,[{agent:'codex',status:'succeeded',included:true,hasResult:true,items:1}]);
+ for(const privateText of ['비공개 질문 내용',ctx.host.project.name,ctx.host.project.description,ctx.work.id,'pending-save-run'])assert.equal(text.includes(privateText),false);
+ document.querySelector('[data-dai="copy-diagnostics"]').click();
+ await until(()=>document.querySelector('[data-dai-copy-status]').textContent.length>0);
+ finishSave();await until(()=>!document.querySelector('.agent-dialog'));assert.equal(ctx.saved().items.length,1);
+});
+
+test('failed apply attempts expose the failure phase and focus the error without clearing responses',async t=>{
+ const ctx=await setup(t);await ctx.open([job('invalid-node-run',[proposal('unknown-node')])]);
+ document.querySelector('[data-dai="apply"]').click();await until(()=>document.querySelector('.agent-error')?.textContent.includes('검토하지 않은 노드'));
+ const report=JSON.parse(document.querySelector('[data-dai-diagnostics]').value);
+ assert.equal(report.applyPhase,'failed');assert.equal(report.applyClicks,1);assert.equal(report.busy,false);
+ assert.equal(document.activeElement,document.querySelector('.agent-error'));
+ assert.ok(sessionStorage.getItem(ctx.key));assert.equal(ctx.saved().items.length,0);
 });
 
 test('a stale review is rejected without clearing pending results or changing the plan',async t=>{
