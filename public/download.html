@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Windows 다운로드 · Agent Desk</title>
+  <link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/style.css?v=0.7.0">
+  <style>
+    .download-page{max-width:760px;margin:8vh auto;padding:32px 24px}.download-page h1{font-size:32px;margin:17px 0;letter-spacing:-1px}.download-page p{line-height:1.9;color:var(--muted);font-size:13px}.download-box{margin:28px 0;padding:28px;background:var(--surface);border:1px solid var(--border);border-radius:14px}.download-box .button{font-size:14px;padding:14px 20px;margin-bottom:14px}.download-page ol{padding-left:22px;line-height:2.1;color:#c9d8cf;font-size:13px}.download-page li{padding:8px 0}.download-page code{padding:2px 6px;border-radius:4px;background:#273a2d;color:var(--mint);overflow-wrap:anywhere}.download-page a{text-decoration:underline;text-underline-offset:4px;color:var(--mint)}.download-page a.button{text-decoration:none;color:#13271c}.download-page #download-status{margin:10px 0;color:var(--mint)}.download-page .small{font-size:11px}.download-page h2{font-size:17px;margin:24px 0 9px}.download-page .back-link{text-decoration:none}.download-page .error{color:#f4b8a6!important}
+  </style>
+</head>
+<body>
+  <main class="download-page">
+    <a class="back-link" href="/">← 프로젝트 화면으로</a>
+    <div class="eyebrow">AGENT DESK · WINDOWS</div>
+    <h1>내 PC에서 시작하세요.</h1>
+    <p>프로젝트·노드 기획 보드와 세 AI의 연결 실행기를 담은 Windows 패키지입니다.<br>Node.js 20 이상이 필요하며, 별도의 패키지 설치는 필요하지 않습니다.</p>
+    <div class="download-box">
+      <button class="button primary" id="download-button">Windows ZIP 다운로드 ↓</button>
+      <p class="small">v0.7.0 · agent-desk-windows.zip · 질문·결정 · 기획 확정 · 업무 분담 · 다른 PC로 백업</p>
+      <p id="download-status" role="status" aria-live="polite"></p>
+      <p class="small">앱 안에서 파일이 저장되지 않으면 이 페이지 주소를 복사해<br>Edge 또는 Chrome 주소창에서 여세요.</p>
+      <p class="small"><a id="direct-link" href="https://agent-desk-projects-mr.opal-loach-5509.chatgpt.site/downloads/agent-desk-windows.zip?v=0.7.0" download="agent-desk-windows.zip">ZIP 파일 직접 열기</a></p>
+    </div>
+    <h2>실행하는 순서</h2>
+    <ol>
+      <li>받은 ZIP 파일을 오른쪽 클릭하고 <strong>모두 압축 풀기</strong>를 선택하세요.</li>
+      <li>Node.js가 없다면 <a href="https://nodejs.org/ko" target="_blank" rel="noopener noreferrer">공식 사이트</a>에서 LTS 버전을 설치하세요.</li>
+      <li>압축을 푼 <code>agent-desk</code> 폴더에서 <code>start-windows.cmd</code>를 더블클릭하세요.</li>
+      <li>브라우저가 자동으로 열리지 않으면 <code>http://127.0.0.1:4173</code>에 접속하세요. 실행 중에는 명령창을 열어 두세요.</li>
+    </ol>
+    <h2>v0.7.0 추가 기능</h2>
+    <ol><li><strong>질문·결정</strong>에서 답변 필요 / 확인 필요 / 결정 완료를 항목별로 관리합니다. AI 세 개가 검토한 질문을 미리 보고 반영하며, 같은 질문의 AI 의견은 함께 보관합니다.</li><li>노드 정리를 적용하면 관련 질문도 함께 정리됩니다. 답변한 노드가 바뀌면 <strong>답변을 보존하고 재확인</strong>을 요청합니다. 되돌리기로 함께 복원할 수 있습니다.</li><li><strong>기획 확정 · 업무 분담</strong>에서 미결정·충돌·완료 기준을 확인하고 버전으로 확정합니다. 담당 AI·선행 작업·지시를 편집하고 분담서를 내려받을 수 있습니다. 작업 실행은 시작하지 않습니다.</li></ol>
+    <p><strong>기존 실행기 명령창을 닫고 새 ZIP의 실행기를 시작</strong>하세요. 웹 새로고침만으로는 PC 실행기가 업데이트되지 않습니다. AI 연결에서 PC 실행기 v0.7.0을 확인하세요.</p>
+    <h2>회사 PC에서 이어하기</h2>
+    <ol><li>지금 사용 중인 화면에서 <strong>프로젝트·기획 백업</strong> 또는 <strong>전체 프로젝트 백업</strong>으로 JSON을 저장하세요.</li><li>회사 PC에서 이 ZIP을 내려받아 실행하고, 프로젝트 목록의 <strong>가져오기</strong>로 JSON을 불러오세요.</li><li><strong>현재 PC 폴더</strong>를 회사 폴더로 다시 선택하고 각 CLI 로그인·AI 연결을 확인하세요.</li><li>집으로 돌아올 때도 회사에서 최신 JSON을 백업하세요. 가져오기는 기존 프로젝트를 보존하고 새 복사본을 추가합니다.</li></ol>
+    <p>GitHub는 프로그램 코드를 옮기는 데 사용합니다. <strong>push</strong>는 올리기, <strong>clone</strong>은 처음 받기, <strong>pull</strong>은 변경분 받기입니다. 현재 버전의 브라우저 기획 데이터는 Git으로 자동 동기화되지 않으므로 JSON 백업이 필요합니다.</p>
+    <h2>세 AI 연결하기</h2>
+    <ol><li>공식 CLI를 설치하고 로그인하세요: <a href="https://developers.openai.com/codex/cli/" target="_blank" rel="noopener">Codex</a> · <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener">Claude Code</a> · <a href="https://antigravity.google/docs/install?tab=cli" target="_blank" rel="noopener">Antigravity CLI</a>. 데스크톱 앱 로그인과 별도일 수 있습니다.</li><li>실행한 화면 오른쪽 위 <strong>AI 연결</strong>에서 설치를 확인하고 각 <strong>응답 테스트</strong>를 누르세요.</li><li><strong>기획 보드 → AI 기획 요청</strong>에서 에이전트를 선택하고 요청하세요. 응답을 확인한 뒤 그래프에 반영할 수 있습니다.</li></ol>
+    <p>웹 대시보드에서도 사용하려면 로컬 화면의 <strong>AI 연결 → 웹 연결 코드 복사</strong> 후, 웹의 AI 연결 화면에 주소와 코드를 입력하세요.</p>
+    <h2>기획 보드 둘러보기</h2>
+    <p>프로젝트를 열고 <strong>기획 보드 → KAF 시연으로 기능 둘러보기</strong>를 선택하세요.<br>연결선의 +로 노드를 추가하고 수정한 뒤 새로고침해 보세요.</p>
+    <p class="small">기존 실행판을 사용 중이면 명령창을 닫고 새 패키지로 다시 실행하세요. 같은 브라우저와 주소를 사용하면 기존 프로젝트 정보가 유지됩니다.</p>
+    <p class="small">실제 응답 테스트와 기획 요청에는 각 서비스 계정의 사용량이 적용됩니다. 설치·로그인·지원 CLI 버전 확인이 필요하며 자세한 안내는 ZIP 안의 README에 있습니다.</p>
+  </main>
+  <script>
+    const button=document.getElementById('download-button');
+    const status=document.getElementById('download-status');
+    const canonical='https://agent-desk-projects-mr.opal-loach-5509.chatgpt.site';
+    button.addEventListener('click',async()=>{
+      if(location.origin!==canonical){location.href=canonical+'/download.html';return;}
+      button.disabled=true;status.className='';status.textContent='다운로드 파일을 확인하고 있습니다…';
+      try{
+        const response=await fetch('/downloads/agent-desk-windows.zip',{credentials:'same-origin',cache:'no-store'});
+        if(!response.ok)throw new Error('파일을 불러오지 못했습니다. 페이지를 새로고침하고 다시 시도해 주세요.');
+        const bytes=new Uint8Array(await response.arrayBuffer());
+        if(bytes[0]!==80||bytes[1]!==75||bytes[2]!==3||bytes[3]!==4)throw new Error('로그인이 필요하거나 ZIP 파일을 받지 못했습니다. 이 페이지를 Edge 또는 Chrome에서 열고 같은 ChatGPT 계정으로 로그인해 주세요.');
+        const url=URL.createObjectURL(new Blob([bytes],{type:'application/zip'}));
+        const link=document.createElement('a');link.href=url;link.download='agent-desk-windows.zip';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+        status.textContent='다운로드를 시작했습니다. 브라우저의 다운로드 목록을 확인해 주세요.';
+      }catch(error){status.className='error';status.textContent=error.message;}
+      finally{button.disabled=false;}
+    });
+  </script>
+</body>
+</html>

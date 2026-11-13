@@ -1,0 +1,20 @@
+{
+  "name": "agent-desk",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex · Claude · Antigravity 프로젝트 워크스페이스",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.8",
+    "jsdom": "^26.1.0"
+  }
+}
