@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {createPlan,addNode,validatePlan,travelHistory} from '../public/planning-model.js';
-import {organizePlan,parseOrganization,organizationPrompt} from '../public/organize-model.js';
+import {organizePlan,parseOrganization,normalizeOrganization,validateOrganization,organizationPrompt} from '../public/organize-model.js';
 import {ORGANIZE_SCHEMA,parseResponse} from '../scripts/agent-runner.mjs';
 const item=(id,sourceIds,meta={})=>({id,parentId:null,sourceIds,title:id,description:'설명',instructions:'구현',criteria:'검증',reason:'계약을 소비하기 전에 기반을 구현',...meta});
 const meta=(data={})=>({nodeType:'task',order:1,dependsOn:[],functionSteps:['입력 계약 검증','계산 결과 검증'],dependencyState:'defined',dependencyIssues:[],...data});
@@ -62,11 +62,40 @@ test('organization rejects local and cross-boundary execution cycles atomically'
  assert.deepEqual(p,before);
 });
 
-test('organization rejects unknown dependency IDs and collisions with unselected nodes',()=>{
+test('organization rejects unknown dependencies and safely renames unreferenced local ID collisions',()=>{
  const {p,a,b,external}=sample();
  assert.throws(()=>organizePlan(p,[a.id],proposal([item('a',[a.id],meta({dependsOn:['unknown']}))]),{agent:'codex'}),/선행 구현/);
- assert.throws(()=>organizePlan(p,[a.id],proposal([item(external.id,[a.id],meta())]),{agent:'codex'}),/겹칩니다/);
+ const renamed=organizePlan(p,[a.id],proposal([item(external.id,[a.id],meta())]),{agent:'codex'});
+ assert.equal(renamed.nodes.find(n=>n.id===external.id).title,external.title);assert.equal(renamed.nodes.find(n=>n.id===a.id).title,external.id);
  assert.throws(()=>organizePlan(p,[a.id,b.id],proposal([item('a',[a.id],meta()),item('b',[b.id],meta({dependsOn:[a.id]}))]),{agent:'codex'}),/정리안의 노드 ID/);
+});
+
+test('a redundant goal wrapper reconnects to the original goal without duplicating it or losing child dependencies',()=>{
+ const {p,a,b}=sample(),root=p.nodes.find(n=>n.id===p.rootId),before=structuredClone(p);
+ for(const sourceIds of [[],[p.rootId]]){
+  const raw=proposal([{...root,nodeType:'group',order:null,sourceIds,parentId:null,reason:'목표를 보존'},item('a',[a.id],{...meta(),parentId:p.rootId}),item('b',[b.id],{...meta({dependsOn:['a']}),parentId:'a'})]),copy=structuredClone(raw);
+  const checked=validateOrganization(p,[a.id,b.id],raw);assert.equal(checked.nodes.length,2);assert.equal(checked.nodes[0].parentId,null);assert.match(checked.normalizationNotes[0],/전체 목표/);
+  const next=organizePlan(p,[a.id,b.id],raw,{agent:'codex'});assert.equal(next.nodes.length,p.nodes.length);assert.equal(next.nodes.filter(n=>n.id===p.rootId).length,1);
+  for(const key of ['title','description','instructions','criteria'])assert.equal(next.nodes.find(n=>n.id===p.rootId)[key],root[key]);
+  assert.ok(next.edges.some(e=>e.from===p.rootId&&e.to===a.id));assert.ok(next.edges.some(e=>e.from===a.id&&e.to===b.id));assert.deepEqual(next.nodes.find(n=>n.id===b.id).dependsOn,[a.id]);assert.deepEqual(raw,copy);
+ }
+ assert.deepEqual(p,before);
+});
+
+test('local key renaming updates parents but preserves source identity and inherited external dependencies',()=>{
+ const {p,a,b,external}=sample();b.dependsOn=[external.id];external.dependsOn=[];
+ const raw=proposal([item(external.id,[a.id],meta()),item('child',[b.id],{parentId:external.id})]);
+ const checked=normalizeOrganization(p,[a.id,b.id],raw);assert.notEqual(checked.nodes[0].id,external.id);assert.equal(checked.nodes[1].parentId,checked.nodes[0].id);assert.deepEqual(checked.nodes[0].sourceIds,[a.id]);
+ const next=organizePlan(p,[a.id,b.id],raw,{agent:'codex'});assert.ok(next.edges.some(e=>e.from===a.id&&e.to===b.id));assert.deepEqual(next.nodes.find(n=>n.id===b.id).dependsOn,[external.id]);
+ assert.equal(next.nodes.find(n=>n.id===external.id).title,external.title);
+});
+
+test('ambiguous dependency collisions and changed goal requirements are rejected rather than guessed away',()=>{
+ const {p,a,b,external}=sample(),before=structuredClone(p),raw=proposal([item(external.id,[a.id],meta()),item('b',[b.id],meta({dependsOn:[external.id]}))]);
+ assert.throws(()=>validateOrganization(p,[a.id,b.id],raw),e=>e.code==='ORGANIZATION_SYNTHESIS_INVALID'&&e.details.ambiguousIds[0]===external.id);
+ const root=p.nodes.find(n=>n.id===p.rootId);
+ assert.throws(()=>validateOrganization(p,[a.id],proposal([{...root,parentId:null,sourceIds:[],nodeType:'group',instructions:'새로운 중요 요구',reason:'목표 변경'},item('a',[a.id],meta())])),/목표.*변경/);
+ assert.deepEqual(p,before);
 });
 
 test('organizer schema and prompt distinguish WBS, dependency scheduling and optional function layers',()=>{
@@ -87,7 +116,7 @@ test('organizer preview displays resolved predecessor names, implementation step
   item('screen',[b.id],{...meta({order:1,dependsOn:['core'],functionSteps:['<script>검증 단계</script>','실제 연동 확인']}),parentId:'group'})
  ]);
  sessionStorage.setItem('agent-desk-organize-'+project.id,JSON.stringify({selectedIds:[a.id,b.id],baseChange:p.changeNumber,agent:'codex',instruction:'',job:{id:'preview-order-job',status:'succeeded',result}}));
- const {openOrganizer}=await import('../public/organize-ui.js?v=0.9.4');
+ const {openOrganizer}=await import('../public/organize-ui.js?v=0.9.5');
  await openOrganizer({project,plan:p,selectedIds:[a.id,b.id],onApply:()=>{},onClose:()=>{}});
  const body=document.querySelector('.organize-preview-tree');assert.ok(body);
  assert.match(body.textContent,/묶음 · 직접 실행하지 않음/);assert.match(body.textContent,/우선순위 #1/);assert.match(body.textContent,/선행 구현: core/);assert.match(body.textContent,/함수 구현 순서 \(2단계\)/);

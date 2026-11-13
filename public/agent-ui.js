@@ -1,7 +1,7 @@
-import {modelControls,readModelControls,syncModelControl,usageDashboard,jobMetadataHTML} from './model-controls.js?v=0.9.4';
-import {settingLabel,formatTokens} from './agent-settings.js?v=0.9.4';
-import {runner,AGENT_INFO,isLocal,connectionReport} from './agent-client.js?v=0.9.4';
-import {reviewPrompt} from './planning-model.js?v=0.9.4';
+import {modelControls,readModelControls,syncModelControl,usageDashboard,jobMetadataHTML} from './model-controls.js?v=0.9.5';
+import {settingLabel,formatTokens} from './agent-settings.js?v=0.9.5';
+import {runner,AGENT_INFO,isLocal,connectionReport} from './agent-client.js?v=0.9.5';
+import {reviewPrompt} from './planning-model.js?v=0.9.5';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function dialog(title,large=false){const el=document.createElement('dialog');el.className='agent-dialog'+(large?' agent-dialog-wide':'');el.innerHTML=`<header><div><span class="eyebrow">YOUR LOCAL AGENTS</span><h2>${title}</h2></div><button type="button" class="small-icon" data-ac="close" aria-label="닫기">✕</button></header><div class="agent-dialog-body"></div>`;document.body.append(el);el.showModal();return el;}
 const badge=a=>`<span class="agent-badge ${a.id}"><i>${a.short}</i>${a.name}</span>`;

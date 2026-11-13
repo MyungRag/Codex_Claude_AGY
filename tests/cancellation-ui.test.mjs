@@ -19,7 +19,7 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
   const {window}=new JSDOM('<body></body>',{url:base});
   for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
   window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
-  const {runner}=await import('../public/agent-client.js?v=0.9.4');
+  const {runner}=await import('../public/agent-client.js?v=0.9.5');
   runner.disconnect();runner.settings={};runner.storage=sessionStorage;runner.preferences=localStorage;
   const delivered=deferred(),release=deferred();let postJob,requestId,cancels=0;
   runner.fetcher=async(url,opts)=>{
@@ -32,9 +32,9 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
   };
   t.after(async()=>{release.resolve();if(postJob?.id){service.cancel(postJob.id);await service.jobs.get(postJob.id).done;}window.close();});
   const project={id:'cancel-'+kind,name:'취소 확인',description:'전송 중 취소',instructions:''},plan=createPlan(project),work=addNode(plan,plan.rootId,{title:'작업',instructions:'작업한다',criteria:'완료 기준'});
-  const {openConnections,openAgentReview}=await import('../public/agent-ui.js?v=0.9.4');
-  const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.9.4');
-  const {openOrganizer}=await import('../public/organize-ui.js?v=0.9.4');
+  const {openConnections,openAgentReview}=await import('../public/agent-ui.js?v=0.9.5');
+  const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.9.5');
+  const {openOrganizer}=await import('../public/organize-ui.js?v=0.9.5');
   const options={project,plan,onApply:()=>assert.fail('Cancelled response cannot be applied'),onClose(){}};
   if(kind==='probe')await openConnections();
   if(kind==='review')await openAgentReview(options);
@@ -61,7 +61,7 @@ test('every AI dialog cancels submitted requests with delayed or lost job respon
 });
 
 test('cancelling while model metadata is loading prevents dispatch and stale polls cannot resurrect a cancelled job',async()=>{
- const {RunnerClient}=await import('../public/agent-client.js?v=0.9.4');
+ const {RunnerClient}=await import('../public/agent-client.js?v=0.9.5');
  const client=new RunnerClient({storage:null,preferences:null});client.base='http://127.0.0.1:4173';client.token='a'.repeat(64);client.runnerInfo={features:{unlimitedWait:true,requestCancellation:true,modelCapabilities:true}};
  const metadata=deferred();let posts=0;
  client.models=async()=>{await metadata.promise;return {};};

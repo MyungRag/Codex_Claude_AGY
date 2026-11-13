@@ -1,4 +1,4 @@
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.9.4';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.9.5';
 // Shared, bounded records for questions, immutable baselines and handoff drafts.
 export const decisionTypes={question:'사용자 결정',verification:'추가 확인',constraint:'제약 사항',conflict:'결정 충돌'};
 export const decisionStatuses={answer:'답변 필요',check:'확인 필요',done:'결정 완료'};

@@ -1,7 +1,7 @@
-import {changePlan,appendMessage} from './planning-model.js?v=0.9.4';
-import {reviewDecisionContext} from './review-context.js?v=0.9.4';
-import {addDecision,parseDecisionProposal,updateDecision} from './decision-model.js?v=0.9.4';
-import {array,ensure,recordId,text,decisionSnapshot,nodeFingerprint,questionKey,recommendation} from './decision-core.js?v=0.9.4';
+import {changePlan,appendMessage} from './planning-model.js?v=0.9.5';
+import {reviewDecisionContext} from './review-context.js?v=0.9.5';
+import {addDecision,parseDecisionProposal,updateDecision} from './decision-model.js?v=0.9.5';
+import {array,ensure,recordId,text,decisionSnapshot,nodeFingerprint,questionKey,recommendation} from './decision-core.js?v=0.9.5';
 
 export const reviewItems=(plan,nodeIds)=>plan.items.filter(i=>i.type!=='conflict'&&i.nodeIds.some(id=>nodeIds.includes(id)));
 export const reviewSources=jobs=>jobs.flatMap(j=>(j.result?.items||[]).map((item,index)=>({ref:`${j.agent}-${index+1}`,agent:j.agent,item})));

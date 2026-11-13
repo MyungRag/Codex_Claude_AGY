@@ -1,7 +1,7 @@
-import {jobActivityState} from './progress-model.js?v=0.9.4';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.4';
-import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.9.4';
-import {decisionTypes} from './decision-core.js?v=0.9.4';
+import {jobActivityState} from './progress-model.js?v=0.9.5';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.5';
+import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.9.5';
+import {decisionTypes} from './decision-core.js?v=0.9.5';
 
 const label=id=>AGENT_INFO.find(a=>a.id===id)?.name||id;
 const live=job=>job&&['running','unknown'].includes(job.status);
@@ -34,7 +34,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  const reviewProgress=()=>{
   if(allJobs().some(j=>j.status==='unknown'))return '연결 상태를 확인해야 합니다. 상태를 다시 확인하면 진행 중이던 검토를 이어갑니다.';
   if(activityJobs().some(j=>jobActivityState(j).state==='unknown'))return '실행기 연결 확인이 지연되고 있습니다. 현재 요청의 상태를 확인하고 있습니다.';
-  if(live(pending.merge))return pending.merge.repairAttempt?`2/2 · 주 AI ${label(pending.lead)}가 질문 연결을 자동 정정 중입니다 (1/1회). 추가 버튼 조작 없이 기다리세요.`:`2/2 · 주 AI ${label(pending.lead)}가 통합 중입니다. 완료되면 통합안을 확인할 수 있습니다.`;
+  if(live(pending.merge))return pending.merge.repairAttempt?`2/2 · 주 AI ${label(pending.lead)}가 ${kind==='organize'?'노드 정리안을':'질문 연결을'} 자동 정정 중입니다 (1/1회). 추가 버튼 조작 없이 기다리세요.`:`2/2 · 주 AI ${label(pending.lead)}가 통합 중입니다. 완료되면 통합안을 확인할 수 있습니다.`;
   if(pending.autoMerge&&!pending.merge)return `1/2 · 독립 검토 ${pending.jobs.filter(j=>!live(j)).length}/${pending.jobs.length}개 처리 완료. 끝나면 주 AI ${label(pending.lead)}가 자동으로 통합합니다. 중간에 버튼을 누를 필요가 없습니다.`;
   if(ready())return (pending.merge.repairAttempt?'자동 정정·검증 완료':'검토·통합 완료')+' · 아래 통합안을 확인한 뒤 반영하세요.';
   if(mergeFailed()&&pending.repairAttempts)return `자동 정정 1회 후에도 통합안을 확인하지 못했습니다. 추가 자동 요청은 하지 않습니다. 독립 검토 응답 ${selected().length}개는 보관되어 있습니다.`;
@@ -62,7 +62,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
     ${pending.merge?.startedAt?`<details data-review-metadata><summary>주 AI 요청 정보</summary>${jobMetadataHTML(pending.merge)}</details>`:''}
     ${originals()}
     ${!working?'<details data-review-restart><summary>독립 검토부터 새로 시작 · 기존 응답 교체</summary><p>현재 기획으로 참여 AI 모두에게 새로 요청합니다. 통합만 실패했다면 위의 기존 응답 재시도를 사용하세요.</p><button class="button" data-lr="reset">현재 기획으로 새 검토</button></details>':''}
-   `:`${leadControls()}<form id="lead-review-form"><fieldset class="review-agent-picks"><legend>독립 검토에 참여할 AI</legend>${AGENT_INFO.map(a=>`<label><input type="checkbox" name="agents" value="${a.id}" ${runner.agents.find(s=>s.id===a.id)?.available?(pending.participants.includes(a.id)?'checked':''):'disabled'}>${a.name}</label>`).join('')}</fieldset><details><summary>이번 검토의 모델·추론 설정</summary>${AGENT_INFO.map(a=>`<h4>${a.name}</h4>${modelControls(a.id,pending.settings[a.id],{busy})}`).join('')}</details><p class="helper">AI 연결의 모델 설정을 기본으로 사용합니다. 여기서 바꾼 값은 이번 독립 검토와 주 AI 통합에 적용됩니다. 시작 전에 주 AI를 선택하면 독립 검토 후 자동으로 한 번 더 호출합니다. 중간 조작 없이 통합안까지 만들어 드립니다.${repair?' 질문 통합 결과의 연결 오류는 주 AI가 최대 1회 자동 정정합니다.':''}</p><button class="button primary" ${busy?'disabled':''}>검토 시작 · 주 AI 통합까지 자동 진행</button></form>`}
+   `:`${leadControls()}<form id="lead-review-form"><fieldset class="review-agent-picks"><legend>독립 검토에 참여할 AI</legend>${AGENT_INFO.map(a=>`<label><input type="checkbox" name="agents" value="${a.id}" ${runner.agents.find(s=>s.id===a.id)?.available?(pending.participants.includes(a.id)?'checked':''):'disabled'}>${a.name}</label>`).join('')}</fieldset><details><summary>이번 검토의 모델·추론 설정</summary>${AGENT_INFO.map(a=>`<h4>${a.name}</h4>${modelControls(a.id,pending.settings[a.id],{busy})}`).join('')}</details><p class="helper">AI 연결의 모델 설정을 기본으로 사용합니다. 여기서 바꾼 값은 이번 독립 검토와 주 AI 통합에 적용됩니다. 시작 전에 주 AI를 선택하면 독립 검토 후 자동으로 한 번 더 호출합니다. 중간 조작 없이 통합안까지 만들어 드립니다.${repair?' 통합 결과의 검증 오류는 주 AI가 최대 1회 자동 정정합니다.':''}</p><button class="button primary" ${busy?'disabled':''}>검토 시작 · 주 AI 통합까지 자동 진행</button></form>`}
    ${(plan.reviewHistory||[]).filter(r=>r.kind===kind).length?`<details data-review-history><summary>이전 통합 검토 기록</summary>${plan.reviewHistory.filter(r=>r.kind===kind).map(r=>`<article><strong>${esc(label(r.lead))} · ${esc(r.at)}</strong><p>${esc(r.summary)}</p><p>${esc(r.instruction)}</p><details><summary>AI별 원본</summary><pre class="context-preview">${esc(r.payload)}</pre></details></article>`).join('')}</details>`:''}</div>`;
   for(const key of opened){const panel=el.querySelector('['+key+']');if(panel)panel.open=true;}
  };
@@ -82,14 +82,14 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  const validateCompleted=async()=>{
   try{getResult();delete pending.merge.validationError;save();return;}catch(e){
    pending.merge.validationError=e.message;save();
-   if(!repair||e.code!=='QUESTION_SYNTHESIS_INVALID'||pending.repairAttempts>=1||cancelled||active()||pending.mergeKey!==fingerprint()||Object.values(pending.edits).some(edit=>edit.answer?.trim()))throw e;
+   if(!repair||e.code!==(kind==='organize'?'ORGANIZATION_SYNTHESIS_INVALID':'QUESTION_SYNTHESIS_INVALID')||pending.repairAttempts>=1||cancelled||active()||pending.mergeKey!==fingerprint()||Object.values(pending.edits).some(edit=>edit.answer?.trim()))throw e;
    const content=repair(pending.merge.result,e,selected(),pending.mergeInstruction,pending.nodeIds);
    // Persist the bounded attempt before sending: reloads must resume this job,
    // never submit another correction or repeat the independent paid reviews.
    pending.repairAttempts=1;pending.repairPrevious={id:pending.merge.id,result:pending.merge.result,error:e.message};
    pending.merge={agent:pending.lead,status:'running',requestId:crypto.randomUUID(),repairAttempt:1};
    if(!save()){pending.merge.status='failed';pending.merge.error=error;render();return;}render();
-   await start(pending.merge,content,'questions-merge');
+   await start(pending.merge,content,kind==='organize'?'organize-merge':'questions-merge');
    if(pending.merge.status==='succeeded'){
     try{getResult();delete pending.merge.validationError;}catch(failure){pending.merge.validationError=failure.message;save();throw failure;}
    }
