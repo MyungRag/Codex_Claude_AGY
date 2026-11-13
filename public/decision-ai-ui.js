@@ -1,9 +1,9 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.9.0';
-import {decisionPrompt} from './decision-model.js?v=0.9.0';
-import {questionSynthesisPrompt,validateQuestionSynthesis} from './review-model.js?v=0.9.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.0';
-import {decisionTypes} from './decision-core.js?v=0.9.0';
-import {esc,jobMetadataHTML} from './model-controls.js?v=0.9.0';
+import {openLeadReview} from './lead-review-ui.js?v=0.9.1';
+import {decisionPrompt} from './decision-model.js?v=0.9.1';
+import {questionSynthesisPrompt,validateQuestionSynthesis} from './review-model.js?v=0.9.1';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.1';
+import {decisionTypes} from './decision-core.js?v=0.9.1';
+import {esc,jobMetadataHTML} from './model-controls.js?v=0.9.1';
 export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onApply,onClose,getApplyDiagnostics=()=>({})}){
  if(document.querySelector('.agent-dialog')){onClose();return;}
  // Older cached responses retain their original apply path; new reviews always use lead synthesis.
@@ -30,7 +30,7 @@ export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onAppl
  el.addEventListener('cancel',e=>{e.preventDefault();close();});el.addEventListener('change',e=>{if(e.target.dataset.daiInclude){pending.jobs.find(j=>j.agent===e.target.dataset.daiInclude).include=e.target.checked;save();el.querySelector('[data-dai="apply"]').disabled=busy||active()||!pending.jobs.some(j=>j.status==='succeeded'&&j.include!==false);}});
  el.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;const agents=new FormData(e.target).getAll('agents');if(!agents.length){error='AI 연결에서 에이전트를 연결하고 선택해 주세요.';render();return;}busy=true;error='';pending.jobs=agents.map(agent=>({agent,status:'running',requestId:crypto.randomUUID()}));save();render();await Promise.all(pending.jobs.map(async job=>{try{Object.assign(job,await runner.startPending(job,prompt,kind));}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;}save();render();}));await Promise.all(pending.jobs.filter(j=>j.id&&j.status==='running').map(settle));busy=false;render();});
  el.addEventListener('click',async e=>{const action=e.target.closest('[data-dai]')?.dataset.dai;if(action==='close')close();
-  if(action==='lead-upgrade'&&!busy&&!active()){sessionStorage.setItem(key,JSON.stringify({version:1,baseChange:pending.baseChange,nodeIds:pending.nodeIds,lead:project.development?.lead||'codex',instruction:'',jobs:pending.jobs,merge:null,edits:{}}));el.close();el.remove();return openDecisionAI({project,plan,kind,nodeIds,prompt,onApply,onClose,getApplyDiagnostics});}
+  if(action==='lead-upgrade'&&!busy&&!active()){sessionStorage.setItem(key,JSON.stringify({version:1,autoMerge:false,baseChange:pending.baseChange,nodeIds:pending.nodeIds,lead:project.development?.lead||'codex',instruction:'',jobs:pending.jobs,merge:null,edits:{}}));el.close();el.remove();return openDecisionAI({project,plan,kind,nodeIds,prompt,onApply,onClose,getApplyDiagnostics});}
   if(action==='copy-diagnostics'){const field=el.querySelector('[data-dai-diagnostics]'),status=el.querySelector('[data-dai-copy-status]');field.value=JSON.stringify(diagnostics(),null,2);try{await navigator.clipboard.writeText(field.value);status.textContent='진단 내용을 복사했습니다. 채팅에 붙여넣어 주세요.';}catch{field.focus();field.select();status.textContent='진단 내용이 선택되었습니다. Ctrl+C로 복사한 뒤 채팅에 붙여넣어 주세요.';}return;}
   if(action==='cancel'){await Promise.all(pending.jobs.filter(j=>['running','unknown'].includes(j.status)).map(async j=>{try{await runner.cancelPending(j);}catch(e){j.status='unknown';j.error=e.message;error=e.message;}}));save();render();}
   if(action==='recover'&&!busy){busy=true;render();await Promise.all(pending.jobs.filter(j=>j.id&&['running','unknown'].includes(j.status)).map(settle));busy=false;render();}

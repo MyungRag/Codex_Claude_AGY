@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {createPlan,addNode,validatePlan} from '../public/planning-model.js?v=0.9.0';
-import {addDecision,updateDecision} from '../public/decision-model.js?v=0.9.0';
+import {createPlan,addNode,validatePlan} from '../public/planning-model.js?v=0.9.1';
+import {addDecision,updateDecision} from '../public/decision-model.js?v=0.9.1';
 
 const until=async check=>{for(let n=0;n<100;n++){if(check())return;await new Promise(r=>setTimeout(r,5));}assert.fail('Decision application did not finish');};
 const proposal=(nodeId,type='question',question='어떤 가격을 비교하나요?')=>({type,nodeIds:[nodeId],relatedIds:[],question,reason:'구현 범위 확인',evidence:'사용자 확인 필요',options:[],blocking:true});
@@ -13,8 +13,8 @@ async function setup(t){
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
  window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
- const {mountPlanner}=await import('../public/planning.js?v=0.9.0');
- const {handleDecisionClick}=await import('../public/decision-ui.js?v=0.9.0');
+ const {mountPlanner}=await import('../public/planning.js?v=0.9.1');
+ const {handleDecisionClick}=await import('../public/decision-ui.js?v=0.9.1');
  const project={id:'apply-review',name:'질문 반영',description:'선택 결과 반영 확인',instructions:''};
  project.planning=createPlan(project);
  const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',criteria:'최종 가격 표시'});
@@ -101,7 +101,7 @@ test('a real invalid conflict identifies its AI response and can be excluded wit
 });
 
 test('completed results can be applied while refreshing agent connections is still pending',async t=>{
- const ctx=await setup(t),{runner}=await import('../public/agent-client.js?v=0.9.0');
+ const ctx=await setup(t),{runner}=await import('../public/agent-client.js?v=0.9.1');
  const originalRequest=runner.request,originalRefresh=runner.refresh;
  let finishRefresh,refreshStarted=false;
  const refresh=new Promise(resolve=>{finishRefresh=resolve;});

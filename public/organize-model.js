@@ -1,7 +1,7 @@
-import {recordReview} from './review-model.js?v=0.9.0';
-import {normalizeExecutionMeta} from './execution-order.js?v=0.9.0';
-import {remapDecisionNodes} from './decision-core.js?v=0.9.0';
-import {validatePlan,changePlan,layoutPlan,appendMessage,newNode} from './planning-model.js?v=0.9.0';
+import {recordReview} from './review-model.js?v=0.9.1';
+import {normalizeExecutionMeta} from './execution-order.js?v=0.9.1';
+import {remapDecisionNodes} from './decision-core.js?v=0.9.1';
+import {validatePlan,changePlan,layoutPlan,appendMessage,newNode} from './planning-model.js?v=0.9.1';
 const ensure=(ok,text)=>{if(!ok)throw new Error(text);};
 const id=value=>{ensure(typeof value==='string'&&/^[\w-]{1,80}$/.test(value),'정리안의 노드 ID가 올바르지 않습니다.');return value;};
 const text=(value,max,label)=>{ensure(typeof value==='string'&&value.length<=max,label+' 길이와 형식을 확인해 주세요.');return value.trim();};

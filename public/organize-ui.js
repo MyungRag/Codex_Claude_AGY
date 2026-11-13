@@ -1,8 +1,8 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.9.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.0';
-import {modelControls,readModelControls,syncModelControl,jobMetadataHTML,esc} from './model-controls.js?v=0.9.0';
-import {organizePlan,organizationPrompt} from './organize-model.js?v=0.9.0';
-import {openConnections} from './agent-ui.js?v=0.9.0';
+import {openLeadReview} from './lead-review-ui.js?v=0.9.1';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.1';
+import {modelControls,readModelControls,syncModelControl,jobMetadataHTML,esc} from './model-controls.js?v=0.9.1';
+import {organizePlan,organizationPrompt} from './organize-model.js?v=0.9.1';
+import {openConnections} from './agent-ui.js?v=0.9.1';
 export function organizationExecutionHTML(node,nodes){
  const name=id=>nodes.find(n=>n.id===id)?.title||id;
  const dependencies=(node.dependsOn||[]).map(id=>esc(name(id))).join(' · ');
@@ -42,7 +42,7 @@ export async function openOrganizer({project,plan,selectedIds,onApply,onClose}){
   const load=e.target.closest('[data-model-load]');if(load&&!busy){collect();busy=true;render();try{await runner.models(pending.agent);}catch(e){error=e.message;}finally{busy=false;render();}return;}
   const action=e.target.closest('[data-org]')?.dataset.org;if(!action)return;
   if(action==='close')return close();
-  if(action==='lead-upgrade'&&!busy&&!running()){sessionStorage.setItem(key,JSON.stringify({version:1,baseChange:pending.baseChange,nodeIds:pending.selectedIds,lead:pending.agent,instruction:pending.instruction,jobs:[{...pending.job,agent:pending.agent}],merge:null,edits:{}}));el.close();el.remove();return openOrganizer({project,plan,selectedIds,onApply,onClose});}
+  if(action==='lead-upgrade'&&!busy&&!running()){sessionStorage.setItem(key,JSON.stringify({version:1,autoMerge:false,baseChange:pending.baseChange,nodeIds:pending.selectedIds,lead:pending.agent,instruction:pending.instruction,jobs:[{...pending.job,agent:pending.agent}],merge:null,edits:{}}));el.close();el.remove();return openOrganizer({project,plan,selectedIds,onApply,onClose});}
   if(action==='connections'&&!busy){close();await openConnections();return;}
   if(action==='recover'&&!busy&&pending.job?.id)return settle();
   if(action==='cancel'&&pending.job){try{await runner.cancelPending(pending.job);save();}catch(e){pending.job.status='unknown';pending.job.error=e.message;error=e.message;}render();return;}
