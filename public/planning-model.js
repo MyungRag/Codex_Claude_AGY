@@ -1,5 +1,5 @@
-import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.9.5';
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.9.5';
+import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.10.0';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.10.0';
 // Serializable graph operations. No agent calls or filesystem access occur here.
 export const AGENTS = [{id:'codex',name:'Codex',short:'C'},{id:'claude',name:'Claude',short:'✳'},{id:'agy',name:'AGY',short:'A'}];
 export const NODE_WIDTH=236, NODE_HEIGHT=204;

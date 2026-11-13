@@ -10,7 +10,7 @@ if(value.role==='Builder'){
  const assumption=value.baseline.snapshot.items.find(i=>i.resolution?.kind==='assumption');
  if(!assumption?.answer)throw new Error('Builder must receive an adopted default');
  result={summary:'계산기 소스와 실제 검사 정의',files:calculatorFiles({coreOnly:value.task.id==='engine',mode:assumption.answer}),limitations:[]};
-}else if(value.role==='independent Auditor'){
+}else if(value.role==='Auditor'){
  const passed=value.checks.length>0&&value.checks.every(c=>c.passed);
  result={summary:passed?'호스트가 수행한 검사 확인':'실제 검사 근거 필요',verdict:passed?'pass':'hold',verifiedCriteria:passed?[{criterion:value.task.criteria,evidence:value.checks.map(c=>c.label+' '+c.codeSha).join('; ')}]:[],unverifiedCriteria:passed?[]:['호스트 실행 검사'],previousFindings:value.previousFindings.map(f=>({id:f.id,status:passed?'resolved':'open',evidence:'새 호스트 실행 결과'})),findings:[]};
 }else result={summary:'실제 검사 결과와 적용 기본값을 기록했습니다.',risks:[],recommendation:'실행 가능한 초안 확인'};

@@ -107,7 +107,8 @@ export class AgentRunner{
     }).finally(()=>{this.catalogRequests.delete(agent);this.catalogControllers.delete(agent);});
     this.catalogRequests.set(agent,request);return request;
   }
-  create({agent,prompt,kind='review',requestId,settings={}}){
+  create({agent,prompt,kind='review',requestId,settings={},context={}}){
+    context=Object.fromEntries(['projectId','taskId','role'].filter(k=>typeof context?.[k]==='string'&&/^[\w-]{1,80}$/.test(context[k])).map(k=>[k,context[k]]));
     settings=validateSettings(agent,settings);
     if(this.closed)throw new Error('실행기가 종료 중입니다.');
     if(!AGENT_IDS.includes(agent))throw new Error('검토할 AI를 확인해 주세요.');
@@ -118,11 +119,11 @@ export class AgentRunner{
     this.pruneCancelledRequests();const cancelled=this.cancelledRequests.has(requestId);
     if(!cancelled&&[...this.jobs.values()].some(job=>job.agent===agent&&!job.settled))throw new Error('이 에이전트가 이미 응답 중입니다. 완료하거나 취소한 후 요청해 주세요.');
     for(const [id,job] of this.jobs)if(job.status!=='running'&&(Date.now()-Date.parse(job.createdAt)>3600000||this.jobs.size>=30))this.jobs.delete(id);
-    const job={id:randomUUID(),agent,kind,requestId,prompt,settings,status:'running',timeoutMs:settings.waitMinutes===undefined?this.timeout:settings.waitMinutes*60000,createdAt:new Date().toISOString(),controller:new AbortController()};this.jobs.set(job.id,job);
+    const job={id:randomUUID(),agent,kind,requestId,prompt,context,settings,status:'running',timeoutMs:settings.waitMinutes===undefined?this.timeout:settings.waitMinutes*60000,createdAt:new Date().toISOString(),controller:new AbortController()};this.jobs.set(job.id,job);
     if(cancelled){job.controller.abort();job.status='cancelled';job.settled=true;job.finishedAt=new Date().toISOString();job.done=Promise.resolve();}
     else job.done=this.execute(job);return this.view(job);
   }
-  view(job){if(!job)return null;const {id,requestId,agent,kind,status,createdAt,finishedAt,result,error,errorCode,settings,usage,actualModel,modelInfo,progress,startedAt,timeoutMs}=job;return {observedAt:new Date().toISOString(),process:job.process?{...job.process}:null,activity:job.activity?{...job.activity}:null,outputIdleMs:job.activity?.lastOutputAt?Math.max(0,Date.parse(job.finishedAt||new Date().toISOString())-Date.parse(job.activity.lastOutputAt)):null,settled:job.settled===true,id,requestId,agent,kind,status,createdAt,finishedAt,result,error,errorCode,settings,usage,actualModel,modelInfo,progress,startedAt,timeoutMs,elapsedMs:startedAt?Math.max(0,Date.parse(finishedAt||new Date().toISOString())-Date.parse(startedAt)):0};}
+  view(job){if(!job)return null;const {id,requestId,agent,kind,status,createdAt,finishedAt,result,error,errorCode,settings,usage,actualModel,modelInfo,progress,startedAt,timeoutMs}=job;return {context:job.context||{},observedAt:new Date().toISOString(),process:job.process?{...job.process}:null,activity:job.activity?{...job.activity}:null,outputIdleMs:job.activity?.lastOutputAt?Math.max(0,Date.parse(job.finishedAt||new Date().toISOString())-Date.parse(job.activity.lastOutputAt)):null,settled:job.settled===true,id,requestId,agent,kind,status,createdAt,finishedAt,result,error,errorCode,settings,usage,actualModel,modelInfo,progress,startedAt,timeoutMs,elapsedMs:startedAt?Math.max(0,Date.parse(finishedAt||new Date().toISOString())-Date.parse(startedAt)):0};}
   get(id){return this.view(this.jobs.get(id));}
   cancel(id){const job=this.jobs.get(id);if(!job)return null;if(job.status==='running'){job.controller.abort();job.status='cancelled';job.finishedAt=new Date().toISOString();}return this.view(job);}
   pruneCancelledRequests(){const cutoff=Date.now()-3600000;for(const [id,at] of this.cancelledRequests)if(at<cutoff)this.cancelledRequests.delete(id);while(this.cancelledRequests.size>300)this.cancelledRequests.delete(this.cancelledRequests.keys().next().value);}

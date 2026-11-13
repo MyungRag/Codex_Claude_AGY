@@ -4,7 +4,7 @@ const object=properties=>({type:'object',additionalProperties:false,required:Obj
 const list=items=>({type:'array',items});
 const finding=object({type:{type:'string',enum:['implementation','spec','suggestion','unverified','limitation']},severity:{type:'string',enum:['critical','high','medium','low','info']},summary:string,evidence:string,remedy:string});
 export const DEVELOPMENT_BUILD_SCHEMA=object({summary:string,files:list(object({path:string,action:{type:'string',enum:['write','delete']},content:string})),limitations:list(finding)});
-export const DEVELOPMENT_AUDIT_SCHEMA=object({summary:string,verdict:{type:'string',enum:['pass','fail','hold']},verifiedCriteria:list(object({criterion:string,evidence:string})),unverifiedCriteria:list(string),previousFindings:list(object({id:string,status:{type:'string',enum:['resolved','partial','open','regressed','unverified']},evidence:string})),findings:list(finding)});
+export const DEVELOPMENT_AUDIT_SCHEMA=object({handoff:object({ready:{type:'boolean'},evidence:string}),summary:string,verdict:{type:'string',enum:['pass','fail','hold']},verifiedCriteria:list(object({criterion:string,evidence:string})),unverifiedCriteria:list(string),previousFindings:list(object({id:string,status:{type:'string',enum:['resolved','partial','open','regressed','unverified']},evidence:string})),findings:list(finding)});
 export const DEVELOPMENT_ANALYSIS_SCHEMA=object({summary:string,risks:list(finding),recommendation:string});
 export const DEVELOPMENT_SCHEMAS={'development-build':DEVELOPMENT_BUILD_SCHEMA,'development-audit':DEVELOPMENT_AUDIT_SCHEMA,'development-analysis':DEVELOPMENT_ANALYSIS_SCHEMA};
 const fail=()=>{throw new Error('개발 응답 형식 또는 크기가 올바르지 않습니다. 다시 요청해 주세요.');};
@@ -25,7 +25,9 @@ export function parseDevelopmentResponse(value,kind){
     if(verdict==='pass'&&(!verifiedCriteria.length||verifiedCriteria.some(c=>!c.criterion.trim()||!c.evidence.trim())||unverifiedCriteria.length||issues.some(f=>f.type==='implementation'||f.type==='spec'||f.type==='unverified')))fail();
     const previousFindings=array(value.previousFindings,500).map(f=>({id:text(f.id,200),status:one(f.status,['resolved','partial','open','regressed','unverified']),evidence:text(f.evidence)}));
     if(new Set(previousFindings.map(f=>f.id)).size!==previousFindings.length||previousFindings.some(f=>!f.evidence.trim())||(verdict==='pass'&&previousFindings.some(f=>f.status!=='resolved')))fail();
-    return {summary,verdict,verifiedCriteria,unverifiedCriteria,previousFindings,findings:issues};
+    const handoff=value.handoff===undefined?{ready:verdict==='pass',evidence:verifiedCriteria.map(c=>c.evidence).join(' · ')}:value.handoff;
+    if(typeof handoff.ready!=='boolean'||typeof handoff.evidence!=='string'||handoff.ready&&!handoff.evidence.trim())fail();
+    return {summary,verdict,verifiedCriteria,unverifiedCriteria,previousFindings,findings:issues,handoff:{ready:handoff.ready,evidence:text(handoff.evidence)}};
   }
   if(kind==='development-analysis')return {summary,risks:findings(value.risks),recommendation:text(value.recommendation)};
   fail();

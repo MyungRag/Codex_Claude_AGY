@@ -1,4 +1,4 @@
-import {migrateProjectLocation,legacyLocationProfile} from './model.js?v=0.9.5';
+import {migrateProjectLocation,legacyLocationProfile} from './model.js?v=0.10.0';
 let database;
 export async function openStore(legacyProfile='office') {
   database = await new Promise((resolve,reject) => {

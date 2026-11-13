@@ -1,10 +1,11 @@
-import {jobActivityState} from './progress-model.js?v=0.9.5';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.5';
-import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.9.5';
-import {decisionTypes} from './decision-core.js?v=0.9.5';
+import {jobActivityState} from './progress-model.js?v=0.10.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.10.0';
+import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.10.0';
+import {decisionTypes} from './decision-core.js?v=0.10.0';
 
 const label=id=>AGENT_INFO.find(a=>a.id===id)?.name||id;
 const live=job=>job&&['running','unknown'].includes(job.status);
+const backgroundReviews=new Map();
 // Both review tools share the same persisted two-stage lifecycle, including cancellation.
 export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesize,validate,repair,preview,onApply,onClose}){
  if(document.querySelector('.agent-dialog'))return;
@@ -14,6 +15,8 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  if(!AGENT_INFO.some(a=>a.id===lead))lead='codex';
  let pending={version:1,baseChange:plan.changeNumber,nodeIds,lead,instruction:'',jobs:[],merge:null,edits:{}},busy=false,error='',cancelled=false;
  try{const saved=JSON.parse(sessionStorage.getItem(key)||'null');if(saved?.version===1){pending=saved;pending.autoMerge??=!saved.merge&&saved.jobs.some(live)&&!saved.jobs.some(j=>j.status==='cancelled'||j.cancelRequested);}}catch{}
+ const running=backgroundReviews.get(key),continuing=running?.storage===sessionStorage?running:null;
+ if(continuing)pending=continuing.pending;
  pending.participants||=AGENT_INFO.map(a=>a.id);
  pending.settings||=Object.fromEntries(AGENT_INFO.map(a=>[a.id,runner.getSettings(a.id)]));
  const el=document.createElement('dialog');el.className='agent-dialog agent-dialog-wide';let heartbeat=null;
@@ -50,13 +53,13 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
   const panels=['data-review-originals','data-review-adjust','data-review-restart','data-review-metadata','data-review-history'],opened=panels.filter(key=>el.querySelector('['+key+']')?.open);
   const working=busy||active(),hasJobs=pending.jobs.length>0;
   el.innerHTML=`<header><div><span class="eyebrow">REVIEW → LEAD → APPLY</span><h2>${kind==='organize'?'AI로 노드 정리':'AI로 질문 검토'} · 주 AI 통합</h2></div><button class="small-icon" data-lr="close" ${working?'disabled':''}>✕</button></header>
-   <div class="agent-dialog-body"><p>${esc(project.name)} · 각 AI가 독립 검토한 뒤 주 AI가 하나로 정리합니다.</p>
+   <div class="agent-dialog-body"><p>${esc(project.name)} · 각 AI가 독립 검토한 뒤 주 AI가 하나로 정리합니다.${kind==='questions'?` 추가·변경된 ${pending.nodeIds.length}개 노드만 검토합니다. 기존 답변은 유지합니다.`:''}</p>
    ${hasJobs?`<p data-review-progress role="status"><strong>${esc(reviewProgress())}</strong></p>`:''}
    <p class="agent-error" role="status" tabindex="-1">${esc(error||pending.merge?.validationError||pending.merge?.error||'')}</p>
    ${hasJobs?`
     ${working?leadControls():''}
     <section data-job-activity aria-label="현재 AI 진행 상태">${activityJobs().map(jobActivityHTML).join('')}</section>
-    <div class="review-actions">${!working&&!ready()?mergeButton():''}${active()?'<button class="button" data-lr="cancel">요청 취소</button>':''}${allJobs().some(j=>j.status==='unknown')?`<button class="button" data-lr="recover" ${busy?'disabled':''}>상태 다시 확인</button>`:''}</div>
+    <div class="review-actions">${!working&&!ready()?mergeButton():''}${active()?'<button class="button" data-lr="monitor">AI 실행 확인으로 이동 · 백그라운드 계속</button><button class="button" data-lr="cancel">요청 취소</button>':''}${allJobs().some(j=>j.status==='unknown')?`<button class="button" data-lr="recover" ${busy?'disabled':''}>상태 다시 확인</button>`:''}</div>
     ${ready()?finalPreview():''}
     ${!working?`<details data-review-adjust><summary>추가 요구·주 AI 변경 · 필요할 때만</summary>${leadControls()}${ready()?mergeButton():''}</details>`:''}
     ${pending.merge?.startedAt?`<details data-review-metadata><summary>주 AI 요청 정보</summary>${jobMetadataHTML(pending.merge)}</details>`:''}
@@ -67,7 +70,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
   for(const key of opened){const panel=el.querySelector('['+key+']');if(panel)panel.open=true;}
  };
  const poll=async job=>{try{await runner.pollPending(job,()=>{job.lastCheckedAt=new Date().toISOString();render();},{refreshInBackground:true});}catch(e){job.status=e.status===404?'failed':'unknown';job.error=e.message;}save();render();};
- const start=async(job,content,jobKind)=>{job.requestedAt||=new Date().toISOString();try{if(!runner.runnerInfo)await runner.refresh();await runner.startPending(job,content,jobKind,pending.settings[job.agent]);job.lastCheckedAt=new Date().toISOString();save();render();if(job.id&&job.status==='running')await poll(job);}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;job.errorCode=e.code;}save();render();};
+ const start=async(job,content,jobKind)=>{job.context={projectId:project.id,...(pending.nodeIds.length===1?{taskId:pending.nodeIds[0]}:{})};job.requestedAt||=new Date().toISOString();try{if(!runner.runnerInfo)await runner.refresh();await runner.startPending(job,content,jobKind,pending.settings[job.agent]);job.lastCheckedAt=new Date().toISOString();save();render();if(job.id&&job.status==='running')await poll(job);}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;job.errorCode=e.code;}save();render();};
  const merge=async()=>{
   if(cancelled||active()||!selected().length)return;
   if(plan.changeNumber!==pending.baseChange)throw new Error('기획이 변경되었습니다. 현재 기획으로 새 검토를 요청해 주세요.');
@@ -97,7 +100,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
   }
  };
  const continueAutomatically=async()=>{if(!pending.autoMerge||pending.merge||cancelled||active())return;pending.autoMerge=false;save();await merge();};
- const run=async operation=>{if(busy)return;busy=true;error='';render();try{await operation();}catch(e){error=e.message;}finally{busy=false;if(el.isConnected)save();render();if(error)el.querySelector('.agent-error')?.focus();}};
+ const run=async operation=>{if(busy)return;busy=true;error='';render();let finish;const lease={pending,storage:sessionStorage,done:new Promise(resolve=>{finish=resolve;})};backgroundReviews.set(key,lease);try{await operation();}catch(e){error=e.message;}finally{busy=false;if(el.isConnected)save();render();if(error)el.querySelector('.agent-error')?.focus();if(backgroundReviews.get(key)===lease)backgroundReviews.delete(key);finish();}};
  el.addEventListener('cancel',e=>{e.preventDefault();close();});
  const collectModels=()=>{if(el.querySelector('#lead-review-form'))for(const a of AGENT_INFO)pending.settings[a.id]=readModelControls(el,a.id);};
  el.addEventListener('input',e=>{if(e.target.dataset.customModel)syncModelControl(e);collectModels();if(e.target.matches('[data-instruction]')){pending.instruction=e.target.value;const apply=el.querySelector('[data-lr="apply"]');if(apply)apply.disabled=!ready();}if(e.target.hasAttribute('data-answer'))pending.edits[e.target.dataset.answer]={answer:e.target.value};save();});
@@ -105,6 +108,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  el.addEventListener('submit',e=>{e.preventDefault();const agents=new FormData(e.target).getAll('agents');void run(async()=>{if(!agents.length)throw new Error('AI 연결에서 참여할 AI를 연결해 주세요.');runner.requireFeature('leadReview');cancelled=false;pending.autoMerge=true;pending.jobs=agents.map(agent=>({agent,status:'running',requestId:crypto.randomUUID()}));save();render();await Promise.all(pending.jobs.map(j=>start(j,prompt(pending.instruction,pending.nodeIds),kind)));await continueAutomatically();});});
  el.addEventListener('click',e=>{const load=e.target.closest('[data-model-load]');if(load){void run(async()=>{collectModels();await runner.models(load.dataset.modelLoad);});return;}if(e.target.closest('[data-model-reset]')){syncModelControl(e);collectModels();save();return;}const choice=e.target.closest('[data-choice]');if(choice&&!busy){const index=choice.dataset.choice;pending.edits[index]={answer:pending.merge.result.items[index].options[Number(choice.dataset.option)].label};save();render();return;}
   const action=e.target.closest('[data-lr]')?.dataset.lr;
+  if(action==='monitor'){save();window.clearInterval(heartbeat);el.close();el.remove();onClose();location.hash=project.id+'/activity';return;}
   if(action==='close')close();
   if(action==='merge')void run(async()=>{cancelled=false;await merge();});
   if(action==='cancel'){cancelled=true;pending.autoMerge=false;save();void Promise.all(allJobs().filter(live).map(async job=>{try{await runner.cancelPending(job);}catch(e){job.status='unknown';job.error=e.message;}})).then(()=>{save();render();});}
@@ -116,6 +120,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  // Update only the read-only status panel. Never replace input fields or buttons on timer ticks.
  heartbeat=window.setInterval(()=>{if(!el.isConnected){window.clearInterval(heartbeat);return;}const panel=el.querySelector('[data-job-activity]');if(panel)panel.innerHTML=activityJobs().map(jobActivityHTML).join('');const summary=el.querySelector('[data-review-progress] strong');if(summary&&summary.textContent!==reviewProgress())summary.textContent=reviewProgress();},1000);
  // Do not refresh CLI availability on a restored completed result; it can be saved immediately.
- if(pending.jobs.length){await run(async()=>{for(const job of allJobs().filter(j=>live(j)&&!j.id)){try{await runner.cancelPending(job);}catch(e){job.status='unknown';job.error=e.message;}}await Promise.all(allJobs().filter(j=>j.id&&live(j)).map(poll));await continueAutomatically();if(pending.merge?.status==='succeeded')await validateCompleted();});}
+ if(continuing)await run(async()=>{await continuing.done;});
+ else if(pending.jobs.length){await run(async()=>{for(const job of allJobs().filter(j=>live(j)&&!j.id)){try{await runner.cancelPending(job);}catch(e){job.status='unknown';job.error=e.message;}}await Promise.all(allJobs().filter(j=>j.id&&live(j)).map(poll));await continueAutomatically();if(pending.merge?.status==='succeeded')await validateCompleted();});}
  else await run(async()=>{if(isLocal())await runner.connect(location.origin,'',{local:true});else if(runner.token)await runner.refresh();});
 }

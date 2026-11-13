@@ -42,14 +42,14 @@ test('project backup and copy import preserve primary roles, mode overrides, bud
  assert.equal(Object.hasOwn(withUntrustedRuntime.development,'tasks'),false);assert.equal(Object.hasOwn(withUntrustedRuntime.development,'latestRunnableId'),false);
 });
 
-test('editing project details keeps development settings and backup refuses self-review configuration',()=>{
+test('editing project details keeps development settings and backup preserves self-review configuration',()=>{
  const original=projectWithBaseline();original.development={...defaultDevelopment(),lead:'claude',limits:{maxRevisions:0,maxReviews:1,maxSwitches:0}};
  const edited=validateProject({...original,description:'설명만 수정'});
  assert.deepEqual(edited.development,original.development);assert.deepEqual(edited.planning,original.planning);
  const invalid={...original,development:{...defaultDevelopment(),roles:{builder:'codex',auditor:'codex',challenger:'agy'}}};
- assert.throws(()=>validateProject(invalid),/서로 다른 AI/);
- assert.throws(()=>readBackup(backup([invalid])),/서로 다른 AI/);
+ assert.equal(validateProject(invalid).development.roles.auditor,'codex');
+ assert.doesNotThrow(()=>readBackup(backup([invalid])));
  const badOverride={...original,development:{...defaultDevelopment(),overrides:{verification:{builder:'claude'}}}};
- assert.throws(()=>readBackup(backup([badOverride])),/서로 다른 AI/);
+ assert.doesNotThrow(()=>readBackup(backup([badOverride])));
  assert.deepEqual(original.planning,edited.planning);
 });

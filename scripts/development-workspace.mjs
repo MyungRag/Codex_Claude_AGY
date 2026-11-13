@@ -185,12 +185,12 @@ export class DevelopmentWorkspace{
   const sha=await this.git(root,['rev-parse','HEAD']);let server;
   try{
    const manifest=await readFile(await safeFile(root,'agent-desk.checks.json'),'utf8');if(manifest.length>200000)throw new Error('브라우저 검사 정의가 너무 큽니다.');
-   const checks=parseBrowserChecks(JSON.parse(manifest)).filter(c=>!nodeId||!c.nodeIds.length||c.nodeIds.includes(nodeId));
+   const checks=parseBrowserChecks(JSON.parse(manifest)).filter(c=>!nodeId||c.nodeIds.includes(nodeId));
    if(!checks.length)return results;
    server=await this.launch(root,launch,{signal});
    const checked=await browserChecks(server.url,checks,{signal});
    results.push(...checked.map((c,index)=>({...c,id:'auto-browser-'+index,command:'browser',args:[],codeSha:sha,at:new Date().toISOString()})));
-  }catch(error){checkAbort(signal);results.push({id:'auto-browser',label:'기본 화면 검사',command:'browser',args:[],passed:false,exitCode:error.unavailable?null:1,output:error.message,codeSha:sha,at:new Date().toISOString()});}
+  }catch(error){checkAbort(signal);results.push({id:'auto-browser',label:'기본 화면 검사',command:'browser',args:[],passed:false,exitCode:error.unavailable?null:1,failureKind:error.unavailable?'environment':'definition',output:error.message,codeSha:sha,at:new Date().toISOString()});}
   finally{await server?.stop();}
   return results;
  }

@@ -15,10 +15,11 @@ async function fixture(t){
     cancel:async(...args)=>{calls.push(['cancel',...args]);return {...state,status:'cancelled'};},
     accept:async(...args)=>{calls.push(['accept',...args]);return state;},
     launch:async(...args)=>{calls.push(['launch',...args]);return {url:'http://127.0.0.1:12345/'};},
+    stopLaunch:async(...args)=>{calls.push(['stop',...args]);return {stopped:true};},
     download:async(...args)=>{calls.push(['download',...args]);return Buffer.from('PK\x03\x04fixture-release');},
     close:async()=>{}
   };
-  const agentRunner={close:async()=>{},catalogView:()=>null,usage:()=>({}),status:async()=>[]};
+  const agentRunner={jobs:new Map([['call',{id:'call',agent:'codex',kind:'development-build',status:'running',context:{projectId:'project-1'},result:{private:'SOURCE SHOULD NOT LEAK'},error:'TOKEN SHOULD NOT LEAK'}]]),view:job=>job,close:async()=>{},catalogView:()=>null,usage:()=>({}),status:async()=>[]};
   const server=createAppServer({agentRunner,developmentRunner});
   server.listen(0,'127.0.0.1');await once(server,'listening');
   t.after(()=>new Promise(resolve=>server.close(resolve)));
@@ -33,7 +34,7 @@ async function fixture(t){
 
 test('development execution and release endpoints remain inside the paired loopback API boundary',async t=>{
   const {calls,origin,headers,call}=await fixture(t);
-  const routes=[['GET','/project-1'],['POST','/start'],['POST','/preview'],['POST','/project-1/cancel'],['POST','/project-1/accept'],['POST','/project-1/releases/release-1/launch'],['GET','/project-1/releases/release-1/download']];
+  const routes=[['GET','/project-1'],['POST','/start'],['POST','/preview'],['POST','/project-1/cancel'],['POST','/project-1/accept'],['POST','/project-1/releases/release-1/launch'],['GET','/project-1/releases/release-1/download'],['POST','/project-1/releases/release-1/stop']];
   for(const [method,route] of routes){
     const options={method,...(method==='POST'?{body:'{}'}:{})};
     assert.equal((await call(route,{...options,headers:{Authorization:''}})).status,401,route);
@@ -101,4 +102,12 @@ test('development runtime errors are surfaced without converting missing release
   developmentRunner.start=async()=>{throw Object.assign(new Error('이미 개발 작업이 진행 중입니다.'),{status:409});};
   const busy=await call('/start',{method:'POST',body:'{}'});
   assert.ok([400,409].includes(busy.status));assert.match((await busy.json()).error,/진행 중/);
+});
+
+
+test('activity endpoint shares authentication, omits source/error details, and stopping a release is explicit',async t=>{
+ const {calls,origin,headers,call}=await fixture(t);
+ assert.equal((await fetch(origin+'/api/agents/activity',{headers:{...headers,Authorization:''}})).status,401);
+ const response=await fetch(origin+'/api/agents/activity',{headers}),data=await response.json();assert.equal(response.status,200);assert.equal(data.jobs[0].context.projectId,'project-1');assert.equal(data.jobs[0].result,undefined);assert.doesNotMatch(JSON.stringify(data),/SHOULD NOT LEAK/);
+ const stopped=await call('/project-1/releases/release-1/stop',{method:'POST',body:'{}'});assert.equal(stopped.status,200);assert.deepEqual(calls.pop(),['stop','project-1','release-1']);
 });

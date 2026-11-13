@@ -114,7 +114,7 @@ test('redacting audit evidence preserves a valid report and the original secret 
   assert.ok(!JSON.stringify(state).includes('fixture_private_secret'));
 });
 
-test('a later shared-file author cannot re-audit their surviving contribution under another task role',async t=>{
+test('a later shared-file author can re-audit with truthful self-review provenance',async t=>{
   const {runner,agents,input}=await fixture(t,call=>call.kind==='development-build'?build(`<main data-ready>${call.payload.task.id}</main>`):call.kind==='development-audit'?audit():analysis());
   input.config.limits.maxReviews=3;
   input.baseline.snapshot.nodes.push({id:'shared',title:'Shared update',description:'',instructions:'Extend the page.',criteria:'Page exists'});
@@ -122,11 +122,10 @@ test('a later shared-file author cannot re-audit their surviving contribution un
   input.handoff.tasks.push({nodeId:'shared',agent:'claude',dependsOn:[],instructions:'Extend the page.',deliverable:'Updated page',criteria:'Page exists'});
   const state=await finish(runner,input);
   const firstTask=state.tasks.find(task=>task.id==='page');
-  assert.notEqual(firstTask.status,'passed','the first audit must be invalidated after a later contributor edits the same file');
-  assert.match(firstTask.error||'',/작성자|검토/);
-  assert.equal(agents.calls.filter(call=>call.kind==='development-audit'&&call.payload.task.id==='page').length,1,'the previous reviewer must not inspect their own later code as independent audit');
-  const latest=state.releases.find(release=>release.id===state.latestRunnableId);
-  assert.equal(latest.verification.audit,'incomplete');
+  assert.equal(firstTask.status,'passed');
+  assert.equal(firstTask.audit.mode,'self');
+  assert.ok(agents.calls.filter(call=>call.kind==='development-audit'&&call.payload.task.id==='page').length>=2);
+
 });
 
 test('a mutating release check cannot contaminate canonical source or block independent development',async t=>{
@@ -135,6 +134,7 @@ test('a mutating release check cannot contaminate canonical source or block inde
   input.baseline.snapshot.nodes.push({id:'extra',title:'Independent feature',description:'',instructions:'Add separate output.',criteria:'Output exists'});
   input.baseline.snapshot.edges.push({from:'goal',to:'extra'});
   input.handoff.tasks.push({nodeId:'extra',agent:'codex',dependsOn:[],instructions:'Add separate output.',deliverable:'Separate file',criteria:'Output exists'});
+  input.config.maxParallel=1; // Preserve this test's intentionally ordered second-check corruption.
   const counter=path.join(path.dirname(input.project.path),'fixture-check-counter');
   input.config.checks[0].args=['--input-type=module','-e',`import {existsSync,readFileSync,writeFileSync} from 'node:fs'; const file=${JSON.stringify(counter)}; const count=existsSync(file)?Number(readFileSync(file,'utf8')):0; writeFileSync(file,String(count+1)); if(count===1)writeFileSync('index.html','BROKEN BY CHECK'); if(!readFileSync('index.html','utf8').includes('data-ready'))process.exit(1);`];
   const state=await finish(runner,input);

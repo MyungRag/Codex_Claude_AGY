@@ -28,7 +28,7 @@ if(value.role==='Builder'){
  const bad=instructions==='FAIL'||instructions==='CRITICAL'||(instructions==='ROTATE'&&provider==='codex');
  const files=instructions==='REMOVE_ENTRY'?[{path:'index.html',action:'delete',content:''}]:[{path:value.task.id==='app'?'index.html':value.task.id+'.txt',action:'write',content:value.task.id==='app'?'<html><body>'+(bad?'BAD':'GOOD')+'</body></html>':'GOOD'}];
  result={summary:'Source proposal',files,limitations:[]};
-}else if(value.role==='independent Auditor'){
+}else if(value.role==='Auditor'){
  const failed=instructions==='FAIL'||instructions==='CRITICAL'||value.files.some(file=>file.path==='index.html'&&file.content.includes('BAD'));
  result={summary:failed?'Defect found':'Criteria verified',verdict:failed?'fail':'pass',verifiedCriteria:failed?[]:[{criterion:value.task.criteria,evidence:'Pinned file content and supplied successful host check'}],unverifiedCriteria:[],previousFindings:previous.map(f=>({id:f.id,status:failed?'open':'resolved',evidence:failed?'Defect persists':'Verified fixed source'})),findings:failed?[issue]:[]};
 }else result={summary:'Coordination evidence reviewed',risks:[],recommendation:'Continue only within approved scope'};
@@ -71,7 +71,7 @@ test('bounded combination switching changes the two active providers without res
  assert.equal(state.tasks[0].builder,'claude');assert.equal(state.tasks[0].auditor,'agy');assert.equal(state.tasks[0].reviewCount,2);assert.equal(state.tasks[0].revisionCount,1);assert.equal(state.attempts[0].revisionCount,1);assert.equal(state.attempts[0].switchCount,1);assert.equal(state.attempts[0].taskCounts.app.rounds.length,2);
  assert.deepEqual(state.tasks[0].authors,['codex','claude']);assert.ok(state.tasks[0].findings.every(f=>f.status==='resolved'));
  const next=payload(source,{strategy:'procedural',config:{roles:{builder:'agy',auditor:'codex',challenger:'claude'}}});next.retry=true;next.baseline.id='baseline-2';next.baseline.number=2;next.handoff.baselineId='baseline-2';next.handoff.tasks[0].instructions='CHANGED';
- await runtime.start(next);const blocked=await finished(runtime);assert.match(blocked.tasks[0].error,/기존 코드 작성자/);assert.equal(blocked.tasks[0].reviewCount,2);
+ await runtime.start(next);const blocked=await finished(runtime);assert.equal(blocked.tasks[0].error,null);assert.equal(blocked.tasks[0].audit.mode,'self');assert.equal(blocked.tasks[0].reviewCount,3);
 });
 
 test('failed candidate preserves last runnable artifact and unrelated successful tasks',async t=>{
@@ -96,9 +96,9 @@ test('critical findings cannot be accepted into a runnable release; mode preview
  const preview=await runtime.preview(payload(source,{strategy:'issue',instructions:'CRITICAL',tasks:['app','notes']}));assert.equal(preview.entries.find(entry=>entry.taskId==='app').action,'build');
 });
 
-test('unavailable check environment holds without spending reviews and resumes verification without rebuilding',async t=>{
+test('unavailable check environment retains unverified evidence and resumes verification without rebuilding',async t=>{
  const {source,runtime,agentRunner}=await setup(t),input=payload(source,{config:{checks:[{id:'missing',label:'Unavailable tool',command:'agent-desk-fixture-missing-tool',args:[]}]}});
- await runtime.start(input);const held=await finished(runtime);assert.equal(held.tasks[0].status,'blocked');assert.equal(held.tasks[0].reviewCount,0);assert.equal(held.tasks[0].revisionCount,0);
+ await runtime.start(input);const held=await finished(runtime);assert.equal(held.tasks[0].status,'limited');assert.equal(held.tasks[0].reviewCount,1);assert.equal(held.tasks[0].revisionCount,0);
  const next=payload(source);next.retry=true;const preview=await runtime.preview(next);assert.equal(preview.entries[0].action,'verify');
  const before=[...agentRunner.jobs.values()].filter(job=>job.kind==='development-build').length;await runtime.start(next);const resumed=await finished(runtime);assert.equal(resumed.tasks[0].status,'passed',JSON.stringify(resumed));assert.equal([...agentRunner.jobs.values()].filter(job=>job.kind==='development-build').length,before);
 });

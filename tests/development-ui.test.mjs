@@ -35,12 +35,12 @@ test('five ordered strategies have distinct adjacent flows and inherited/overrid
  assert.ok(ui.$('[data-dev="start"]').classList.contains('primary'));
 });
 
-test('invalid self-review and malformed commands are explained; draft navigation remains available',async t=>{
+test('self-review is saved and malformed commands are explained; draft navigation remains available',async t=>{
  const ui=setup(t);await ui.view.ready;
- ui.change('roles.auditor','codex');ui.submit('[data-form="settings"]');await until(()=>!ui.view.busy);assert.equal(ui.calls.save.length,0);assert.match(ui.$('.dev-alert').textContent,/Builder|Auditor|검토|달라/);
- assert.equal(ui.view.canLeave(),true);assert.ok(sessionStorage.getItem(ui.view.key));
- ui.change('roles.auditor','claude');ui.click('[data-dev="add-check"]');ui.input('checks.0.argsText','npm test && rm');ui.submit('[data-form="settings"]');await until(()=>!ui.view.busy);assert.match(ui.$('.dev-alert').textContent,/JSON/);assert.equal(ui.calls.save.length,0);
- ui.input('checks.0.argsText','["test"]');ui.input('launch.prepareText','[{"command":"npm","args":["ci"]}]');ui.submit('[data-form="settings"]');await until(()=>ui.calls.save.length===1&&!ui.view.busy);assert.deepEqual(ui.calls.save[0].config.launch.prepare,[{command:'npm',args:['ci']}]);
+ ui.change('roles.auditor','codex');ui.submit('[data-form="settings"]');await until(()=>!ui.view.busy);assert.equal(ui.calls.save.length,1);assert.equal(ui.calls.save[0].config.roles.auditor,'codex');
+ assert.equal(ui.view.canLeave(),true);assert.equal(sessionStorage.getItem(ui.view.key),null);
+ ui.change('roles.auditor','claude');ui.click('[data-dev="add-check"]');ui.input('checks.0.argsText','npm test && rm');ui.submit('[data-form="settings"]');await until(()=>!ui.view.busy);assert.match(ui.$('.dev-alert').textContent,/JSON/);assert.equal(ui.calls.save.length,1);
+ ui.input('checks.0.argsText','["test"]');ui.input('launch.prepareText','[{"command":"npm","args":["ci"]}]');ui.submit('[data-form="settings"]');await until(()=>ui.calls.save.length===2&&!ui.view.busy);assert.deepEqual(ui.calls.save[1].config.launch.prepare,[{command:'npm',args:['ci']}]);
  ui.change('limits.maxReviews','');ui.submit('[data-form="settings"]');await until(()=>!ui.view.busy);assert.match(ui.$('.dev-alert').textContent,/정수/);
 });
 

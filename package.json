@@ -1,6 +1,6 @@
 {
   "name": "agent-desk",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "Codex · Claude · Antigravity 프로젝트 워크스페이스",

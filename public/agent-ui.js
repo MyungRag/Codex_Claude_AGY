@@ -1,7 +1,7 @@
-import {modelControls,readModelControls,syncModelControl,usageDashboard,jobMetadataHTML} from './model-controls.js?v=0.9.5';
-import {settingLabel,formatTokens} from './agent-settings.js?v=0.9.5';
-import {runner,AGENT_INFO,isLocal,connectionReport} from './agent-client.js?v=0.9.5';
-import {reviewPrompt} from './planning-model.js?v=0.9.5';
+import {modelControls,readModelControls,syncModelControl,usageDashboard,jobMetadataHTML} from './model-controls.js?v=0.10.0';
+import {settingLabel,formatTokens} from './agent-settings.js?v=0.10.0';
+import {runner,AGENT_INFO,isLocal,connectionReport} from './agent-client.js?v=0.10.0';
+import {reviewPrompt} from './planning-model.js?v=0.10.0';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function dialog(title,large=false){const el=document.createElement('dialog');el.className='agent-dialog'+(large?' agent-dialog-wide':'');el.innerHTML=`<header><div><span class="eyebrow">YOUR LOCAL AGENTS</span><h2>${title}</h2></div><button type="button" class="small-icon" data-ac="close" aria-label="닫기">✕</button></header><div class="agent-dialog-body"></div>`;document.body.append(el);el.showModal();return el;}
 const badge=a=>`<span class="agent-badge ${a.id}"><i>${a.short}</i>${a.name}</span>`;
@@ -46,7 +46,7 @@ export async function openAgentReview({project,plan,targetId=null,onApply,onClos
   el.addEventListener('change',e=>{if(e.target.dataset.include){const job=pending.jobs.find(j=>j.agent===e.target.dataset.include);job.include=e.target.checked;save();render();}});
   el.addEventListener('submit',async e=>{e.preventDefault();if(busy||pending.jobs.length)return;const data=new FormData(e.target),agents=data.getAll('agents');if(!agents.length){error='설치된 에이전트를 하나 이상 선택해 주세요.';render();return;}pending.instruction=String(data.get('instruction')||'');pending.selected=agents;pending.jobs=agents.map(agent=>({agent,status:'running',requestId:crypto.randomUUID()}));busy=true;starting=true;error='';save();render();
     const prompt=reviewPrompt(project,plan,targetId)+'\n\n이번 추가 의견:\n'+pending.instruction+'\n\n응답에는 summary와 nodes를 포함하세요. summary에는 판단 근거, 질문, 기존 노드 수정·삭제 의견을 적고 nodes에는 새로 추가할 노드만 넣으세요. 이전 에이전트 의견도 검토하되 동의하지 않는 점은 이유를 적으세요.';
-    await Promise.all(pending.jobs.map(async job=>{try{Object.assign(job,await runner.startPending(job,prompt));save();}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;save();}render();}));starting=false;
+    await Promise.all(pending.jobs.map(async job=>{try{job.context={projectId:project.id};Object.assign(job,await runner.startPending(job,prompt));save();}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;save();}render();}));starting=false;
     await Promise.all(pending.jobs.filter(j=>j.id&&j.status==='running').map(settle));busy=false;render();
   });
   el.addEventListener('click',async e=>{const action=e.target.closest('[data-ac]')?.dataset.ac;if(!action)return;

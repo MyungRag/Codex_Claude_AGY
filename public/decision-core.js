@@ -1,4 +1,4 @@
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.9.5';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.10.0';
 // Shared, bounded records for questions, immutable baselines and handoff drafts.
 export const decisionTypes={question:'사용자 결정',verification:'추가 확인',constraint:'제약 사항',conflict:'결정 충돌'};
 export const decisionStatuses={answer:'답변 필요',check:'확인 필요',done:'결정 완료'};
@@ -36,7 +36,10 @@ export function validateItems(raw,nodes){
 // question fingerprints remain current after the additive migration.
 const semanticExecutionMeta=n=>{const meta=normalizeExecutionMeta(n);return meta.nodeType==='task'&&meta.order===null&&!meta.dependsOn.length&&!meta.functionSteps.length&&meta.dependencyState==='unreviewed'&&!meta.dependencyIssues.length?{}:meta;};
 export const semanticNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria,...semanticExecutionMeta(n)});
-export const nodeFingerprint=(plan,id)=>JSON.stringify({node:semanticNode(plan.nodes.find(n=>n.id===id)),parents:plan.edges.filter(e=>e.to===id).map(e=>e.from).sort()});
+const questionNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria,nodeType:n.nodeType||'task',functionSteps:n.functionSteps||[],dependsOn:[...(n.dependsOn||[])].sort()});
+export const nodeFingerprint=(plan,id)=>JSON.stringify({node:questionNode(plan.nodes.find(n=>n.id===id))});
+export function normalizeQuestionFingerprint(value){try{return JSON.stringify({node:questionNode(JSON.parse(value).node)});}catch{return value;}}
+export const changedQuestionNodes=(plan,nodeIds=plan.nodes.map(n=>n.id))=>nodeIds.filter(id=>plan.nodes.some(n=>n.id===id)&&!plan.questionCoverage.some(c=>c.nodeId===id&&normalizeQuestionFingerprint(c.fingerprint)===nodeFingerprint(plan,id)));
 export function decisionSnapshot(project,plan){return {project:{name:project.name,description:project.description||'',instructions:project.instructions||''},rootId:plan.rootId,nodes:plan.nodes.map(semanticNode).sort((a,b)=>a.id.localeCompare(b.id)),edges:[...plan.edges].sort((a,b)=>(a.from+':'+a.to).localeCompare(b.from+':'+b.to)),items:(plan.items||[]).map(i=>({id:i.id,nodeIds:[...i.nodeIds].sort(),type:i.type,status:i.status,question:i.question,answer:i.answer,evidence:i.evidence,blocking:i.blocking,deferred:i.deferred,deferReason:i.deferReason,relatedIds:[...i.relatedIds].sort(),...snapshotMetadata(i)})).sort((a,b)=>a.id.localeCompare(b.id))};}
 export const snapshotKey=snapshot=>JSON.stringify(snapshot);
 function validateSnapshot(s){
@@ -58,7 +61,7 @@ export function validateTasks(raw,snapshot){
 }
 export function validateDecisionState(raw,nodes){
  const items=validateItems(raw.items,nodes),nodeIds=new Set(nodes.map(n=>n.id));
- const coverage=array(raw.questionCoverage??[],100,'검토 기록').map(c=>{ensure(nodeIds.has(c.nodeId),'검토 대상 노드가 없습니다.');return {nodeId:c.nodeId,fingerprint:text(c.fingerprint,500000,'검토 내용'),at:stamp(c.at)};});
+ const coverage=array(raw.questionCoverage??[],100,'검토 기록').map(c=>{ensure(nodeIds.has(c.nodeId),'검토 대상 노드가 없습니다.');return {nodeId:c.nodeId,fingerprint:normalizeQuestionFingerprint(text(c.fingerprint,500000,'검토 내용')),at:stamp(c.at)};});
  const baselines=array(raw.baselines??[],10,'확정 기획 버전').map(b=>({id:recordId(b.id),number:b.number,at:stamp(b.at),note:text(b.note??'',3000,'확정 메모'),snapshot:validateSnapshot(b.snapshot)}));
  ensure(baselines.every(b=>Number.isSafeInteger(b.number)&&b.number>0)&&new Set(baselines.map(b=>b.id)).size===baselines.length&&new Set(baselines.map(b=>b.number)).size===baselines.length,'확정 버전을 확인해 주세요.');
  const handoffs=array(raw.handoffs??[],10,'업무 분담 기록').map(h=>{const base=baselines.find(b=>b.id===h.baselineId);ensure(base,'업무 분담의 확정 기획이 없습니다.');return {baselineId:base.id,tasks:validateTasks(h.tasks,base.snapshot),updatedAt:stamp(h.updatedAt),source:text(h.source??'직접 편집',100,'분담 출처')};});ensure(new Set(handoffs.map(h=>h.baselineId)).size===handoffs.length,'확정 버전당 업무 분담은 하나입니다.');
@@ -82,5 +85,5 @@ export function reconcileDecisions(before,next){
  // Equal questions are safe to combine only when their answers agree.
  const unique=[],mapped=new Map();for(const item of next.items){const same=unique.find(i=>questionKey(i)===questionKey(item)&&i.answer===item.answer&&i.evidence===item.evidence&&i.status===item.status&&i.deferred===item.deferred&&i.deferReason===item.deferReason);if(same){same.sources=[...same.sources,...item.sources].filter((s,i,a)=>a.findIndex(x=>JSON.stringify(x)===JSON.stringify(s))===i).slice(0,30);same.history=[...same.history,...item.history].slice(-20);same.blocking||=item.blocking;mapped.set(item.id,same.id);}else unique.push(item);}
  next.items=unique.map(i=>({...i,relatedIds:[...new Set(i.relatedIds.map(id=>mapped.get(id)||id))].filter(id=>id!==i.id)})).filter(i=>i.type!=='conflict'||i.relatedIds.length>=2);
- next.questionCoverage=(next.questionCoverage||[]).filter(c=>nodes.has(c.nodeId)&&c.fingerprint===nodeFingerprint(next,c.nodeId));
+ next.questionCoverage=(next.questionCoverage||[]).filter(c=>nodes.has(c.nodeId)&&normalizeQuestionFingerprint(c.fingerprint)===nodeFingerprint(next,c.nodeId));
 }

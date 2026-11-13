@@ -10,7 +10,7 @@ export const STRATEGIES=[
  {id:'procedural',name:'운영 절차 중심',purpose:'역할·전달서·검토 기록을 명확히 남기며 진행합니다.',advantages:['누가 무엇을 구현·검토했는지 추적하기 쉽습니다.','기획 변경과 구현 오류를 구분합니다.'],disadvantages:['기록과 전달 절차에 시간이 듭니다.','절차만으로 구현 품질이 보장되지는 않습니다.'],limitation:'독립 검토에 필요한 실행 환경과 근거는 별도로 확보해야 합니다.',steps:['확정 기획·완료 기준 확인','Auditor 검증 계획','Builder 구현·전달서','입력·코드 SHA 대조','Auditor 독립 검토·수정','누적 기록·인계'],policy:{preflightAudit:true,riskAnalysis:false,evidenceAnalysis:false,issueAnalysis:false,rotation:false}},
  {id:'verification',name:'검증 중심',purpose:'실제 실행 근거와 회귀 검사를 중심으로 완료를 판단합니다.',advantages:['정적 확인과 실제 실행 성공을 구분합니다.','기존 기능에 미친 영향을 추가로 점검합니다.'],disadvantages:['검사 환경과 테스트 준비 비용이 큽니다.','검증할 수 없는 요구사항은 보류됩니다.'],limitation:'자동 검사를 통과해도 검사에 포함되지 않은 동작까지 보장하지 않습니다.',steps:['완료 기준·검사 명령 확인','Builder 구현·실제 검사','고정 코드에서 Auditor 검토','제3 AI의 검증 근거 점검','영향받는 기능 재검증','실행 가능 여부·미검증 기록'],policy:{preflightAudit:false,riskAnalysis:false,evidenceAnalysis:true,issueAnalysis:false,rotation:false}},
  {id:'issue',name:'쟁점 분석 중심',purpose:'실패 원인과 기획·구현의 충돌을 분석한 뒤 필요한 부분을 수정합니다.',advantages:['같은 수정을 반복하는 원인을 찾는 데 유리합니다.','기획 변경·환경 문제·구현 오류를 나눕니다.'],disadvantages:['분석이 길어지면 구현이 늦어질 수 있습니다.','분석 제안에도 검증이 필요합니다.'],limitation:'분석 담당 AI는 사용자의 기획 결정을 대신하거나 검토 실패를 통과로 바꾸지 않습니다.',steps:['확정 기획·미해결 지적 확인','Challenger 쟁점·대안 분석','관련 작업만 Builder 구현','Auditor 독립 검토','미해결 원인·사용자 결정 정리'],policy:{preflightAudit:false,riskAnalysis:false,evidenceAnalysis:false,issueAnalysis:true,rotation:false}},
- {id:'assignment',name:'기존 업무 분담안',purpose:'기획에서 지정한 작업별 담당 AI와 선행 관계를 유지합니다.',advantages:['기존 담당과 업무 분담을 그대로 활용합니다.','서로 독립적인 작업을 계속 진행할 수 있습니다.'],disadvantages:['여러 AI가 작성한 결과를 통합·검증해야 합니다.','공유 코드 변경으로 다른 작업에 영향이 생길 수 있습니다.'],limitation:'작업별 담당이 달라도 같은 코드의 작성자가 최종 검토를 맡을 수는 없습니다.',steps:['기존 업무 분담 불러오기','선행 작업 확인','작업별 담당 AI 구현','다른 AI의 독립 검토','통합 결과·남은 작업 기록'],policy:{preflightAudit:false,riskAnalysis:false,evidenceAnalysis:false,issueAnalysis:false,rotation:false}}
+ {id:'assignment',name:'기존 업무 분담안',purpose:'기획에서 지정한 작업별 담당 AI와 선행 관계를 유지합니다.',advantages:['기존 담당과 업무 분담을 그대로 활용합니다.','서로 독립적인 작업을 계속 진행할 수 있습니다.'],disadvantages:['여러 AI가 작성한 결과를 통합·검증해야 합니다.','공유 코드 변경으로 다른 작업에 영향이 생길 수 있습니다.'],limitation:'작성자가 검토하면 자체 검토로 기록하며 독립 검토와 구분합니다.',steps:['기존 업무 분담 불러오기','선행 작업 확인','작업별 담당 AI 구현','다른 AI의 독립 검토','통합 결과·남은 작업 기록'],policy:{preflightAudit:false,riskAnalysis:false,evidenceAnalysis:false,issueAnalysis:false,rotation:false}}
 ];
 for(const strategy of STRATEGIES){for(const key of ['advantages','disadvantages','steps','policy'])Object.freeze(strategy[key]);Object.freeze(strategy);}
 Object.freeze(STRATEGIES);
@@ -20,12 +20,12 @@ const agent=(value,label)=>{ensure(DEVELOPMENT_AGENTS.includes(value),label+' AI
 const strategyId=value=>{ensure(strategyIds.has(value),'협업 방식을 확인해 주세요.');return value;};
 
 export function defaultDevelopment(){
- return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
+ return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,maxParallel:3,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
 }
 function rolesFrom(raw,base){
  const result={...base};object(raw,'역할');
  for(const role of roleNames)if(Object.hasOwn(raw,role))result[role]=agent(raw[role],role);
- ensure(result.builder!==result.auditor,'주개발자와 주검토자는 서로 다른 AI여야 합니다.');
+
  return result;
 }
 function commandFrom(raw){
@@ -65,7 +65,8 @@ export function validateDevelopment(raw){
   let parsed;try{parsed=new URL(url.replaceAll('{port}','4174'));}catch{}
   ensure(parsed&&parsed.protocol==='http:'&&['127.0.0.1','localhost'].includes(parsed.hostname)&&!parsed.username&&!parsed.password&&!parsed.hash,'실행 확인 주소는 http://127.0.0.1:{port}/ 같은 현재 PC의 HTTP 주소여야 합니다.');
  }
- return {version:1,strategy,lead,roles,overrides,limits,autoSwitch:raw.autoSwitch===true,checks,launch:{kind,entry,command,url,prepare}};
+ const maxParallel=raw.maxParallel??3;ensure(Number.isInteger(maxParallel)&&maxParallel>=1&&maxParallel<=3,'병렬 작업 수는 1~3입니다.');
+ return {version:1,strategy,lead,roles,overrides,limits,autoSwitch:raw.autoSwitch===true,maxParallel,checks,launch:{kind,entry,command,url,prepare}};
 }
 
 export function resolveRoles(config,strategy=config?.strategy??'integrated'){
@@ -82,7 +83,7 @@ export function prepareDevelopmentTasks(baseline,handoff,config){
  return tasks.map(task=>{
   const node=baseline.snapshot.nodes.find(n=>n.id===task.nodeId),builder=checked.strategy==='assignment'?task.agent:primary.builder;
   // Assignment mode preserves the named developer; its independent reviewer may differ from the project default.
-  const auditor=primary.auditor===builder?DEVELOPMENT_AGENTS.find(value=>value!==builder&&value!==primary.builder)??DEVELOPMENT_AGENTS.find(value=>value!==builder):primary.auditor;
+  const auditor=checked.strategy==='assignment'&&primary.auditor===builder?DEVELOPMENT_AGENTS.find(value=>value!==builder&&value!==primary.builder)??DEVELOPMENT_AGENTS.find(value=>value!==builder):primary.auditor;
   const challenger=checked.strategy==='assignment'&&(primary.challenger===builder||primary.challenger===auditor)?DEVELOPMENT_AGENTS.find(value=>value!==builder&&value!==auditor):primary.challenger;
   return {id:recordId(task.nodeId),title:text(node.title,100,'작업 이름'),...normalizeExecutionMeta(task),criteria:task.criteria,instructions:task.instructions,deliverable:task.deliverable,status:'pending',disposition:'open',agent:builder,builder,auditor,challenger,authors:[],findings:[],checks:[],revisionCount:0,reviewCount:0,artifactSha:null,error:null};
  });
@@ -125,7 +126,7 @@ export function planPartialRetry(tasks,{strategy,changedTaskIds=[]}={}){
  // A preserved incomplete dependency is not evidence that its dependents are ready.
  let blocked=true;
  while(blocked){blocked=false;for(const task of tasks){const entry=result.get(task.id);if(!['build','verify','analyze'].includes(entry.action))continue;
-  const dependency=(task.dependsOn??[]).find(id=>{const parent=byId.get(id),plan=result.get(id);return plan.action==='wait'||plan.action==='analyze'||(plan.action==='keep'&&parent.status!=='passed');});
+  const dependency=(task.dependsOn??[]).find(id=>{const parent=byId.get(id),plan=result.get(id);return plan.action==='wait'||plan.action==='analyze'||(plan.action==='keep'&&!dependencyReady(parent));});
   if(dependency){entry.action='wait';entry.reason=`선행 작업 ${byId.get(dependency)?.title||dependency}의 미해결 조건을 먼저 확인해야 합니다.`;blocked=true;}
  }}
  return tasks.map(task=>result.get(task.id));
@@ -137,6 +138,13 @@ export function rotateRoles(config,{strategy=config?.strategy??'integrated',auth
  const contributors=new Set(array(authors,100,'코드 작성자').map(value=>agent(value,'코드 작성자')));
  const roles={builder:current.auditor,auditor:current.challenger,challenger:current.builder};
  if(switchCount>=checked.limits.maxSwitches)return {allowed:false,roles:current,reason:'설정한 AI 조합 교체 한도에 도달했습니다.'};
- if(roles.builder===roles.auditor||contributors.has(roles.auditor))return {allowed:false,roles:current,reason:'기존 코드 작성자가 자신의 코드를 최종 검토할 수 없습니다. 독립 검토자를 확보해야 합니다.'};
- return {allowed:true,roles,reason:'기존 검토자가 개발을 맡고 제3 AI가 독립 검토합니다. 이전 작성자는 조언을 맡습니다.'};
+
+ return {allowed:true,roles,reason:`기존 검토자가 개발을 맡고 다음 AI가 ${contributors.has(roles.auditor)||roles.auditor===roles.builder?'자체':'독립'} 검토합니다. 이전 작성자는 조언을 맡습니다.`};
+}
+
+// A verified contract can be usable before full acceptance. A SHA alone is not readiness.
+export function dependencyReady(task){
+ if(!task||task.disposition==='excluded'||task.dependencyIssues?.length)return false;
+ if((task.findings||[]).some(f=>f.status==='open'&&(f.type==='spec'||f.severity==='critical'||f.type==='implementation'&&f.severity==='high')))return false;
+ return task.status==='passed'||(task.readiness?.ready===true&&task.readiness.codeSha===task.artifactSha&&!!task.readiness.evidence);
 }

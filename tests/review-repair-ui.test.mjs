@@ -1,15 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {createPlan,addNode} from '../public/planning-model.js?v=0.9.5';
-import {addDecision,updateDecision} from '../public/decision-model.js?v=0.9.5';
-import {applyQuestionSynthesis} from '../public/review-model.js?v=0.9.5';
+import {createPlan,addNode} from '../public/planning-model.js?v=0.10.0';
+import {addDecision,updateDecision} from '../public/decision-model.js?v=0.10.0';
+import {applyQuestionSynthesis} from '../public/review-model.js?v=0.10.0';
 const until=async fn=>{for(let i=0;i<300;i++){if(fn())return;await new Promise(r=>setTimeout(r,5));}assert.fail('question repair did not settle');};
 async function setup(t,{alwaysInvalid=false,holdRepair=false}={}){
  const {window}=new JSDOM('<body></body>',{url:'https://agent-desk.test/'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){};window.HTMLDialogElement.prototype.close=function(){};
- const {runner}=await import('../public/agent-client.js?v=0.9.5'),{openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.9.5');
+ const {runner}=await import('../public/agent-client.js?v=0.10.0'),{openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.10.0');
  const original=Object.fromEntries(['agents','runnerInfo','token','startPending','pollPending','cancelPending'].map(k=>[k,runner[k]]));
  t.after(()=>{Object.assign(runner,original);window.close();});
  runner.agents=['codex','claude','agy'].map(id=>({id,available:true}));runner.runnerInfo={features:{leadReview:true}};runner.token='';

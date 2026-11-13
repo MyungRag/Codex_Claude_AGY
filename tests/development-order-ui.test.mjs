@@ -41,8 +41,8 @@ test('progress explains the current prerequisite statuses instead of inferring o
  const {root,view}=setup(t,{nodes:[{id:'root'},...tasks],tasks:tasks.map(({id,...task})=>({...task,nodeId:id})),state:{status:'running',attempts:[{id:'attempt',strategy:'integrated'}],tasks,events:[],releases:[]}});await view.ready;
  root.querySelector('[data-dev="page"][data-page="progress"]').click();
  const materials=root.querySelector('[data-task="materials"]'),rules=root.querySelector('[data-task="rules"]');
- assert.match(materials.textContent,/설계기준 검토 통과/);assert.match(materials.textContent,/선행 작업이 모두 검토를 통과/);
- assert.match(rules.textContent,/선행 검토 대기: 재료 모델/);assert.match(rules.querySelector('.dev-prerequisites').textContent,/재료 모델 진행 중/);
+ assert.match(materials.textContent,/설계기준 검토 통과/);assert.match(materials.textContent,/선행 작업의 필수 결과물이 준비/);
+ assert.match(rules.textContent,/필수 결과물 대기: 재료 모델/);assert.match(rules.querySelector('.dev-prerequisites').textContent,/재료 모델 진행 중/);
 });
 
 test('invalid execution relations show an actionable error without breaking the development view',async t=>{

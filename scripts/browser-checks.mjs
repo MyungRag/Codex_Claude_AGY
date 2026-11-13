@@ -23,16 +23,16 @@ export async function browserChecks(url,checks,{signal}={}){
  let child,sequence=0,buffer='',failure=null;const events=new Map(),requests=new Map(),results=[],runtimeErrors=[];
  const failAll=error=>{failure=error;for(const {reject,timer} of requests.values()){clearTimeout(timer);reject(error);}requests.clear();for(const {reject,timer} of events.values()){clearTimeout(timer);reject(error);}events.clear();};
  const abort=()=>{failAll(new Error('브라우저 검사가 취소되었습니다.'));child?.kill();};
- const waitEvent=(sessionId,method)=>new Promise((resolve,reject)=>{const key=sessionId+':'+method,timer=setTimeout(()=>{events.delete(key);reject(new Error('페이지 준비 시간이 초과되었습니다.'));},15000);events.set(key,{resolve,reject,timer});});
+ const waitEvent=(sessionId,method)=>new Promise((resolve,reject)=>{const key=sessionId+':'+method,timer=setTimeout(()=>{events.delete(key);reject(Object.assign(new Error('페이지 준비 시간이 초과되었습니다.'),{unavailable:true}));},15000);events.set(key,{resolve,reject,timer});});
  const command=(method,params={},sessionId)=>new Promise((resolve,reject)=>{
   if(failure||signal?.aborted){reject(failure||new Error('검사가 취소되었습니다.'));return;}
-  const id=++sequence,timer=setTimeout(()=>{requests.delete(id);reject(new Error('브라우저 검사 응답 시간이 초과되었습니다.'));},15000);
+  const id=++sequence,timer=setTimeout(()=>{requests.delete(id);reject(Object.assign(new Error('브라우저 검사 응답 시간이 초과되었습니다.'),{unavailable:true}));},15000);
   requests.set(id,{resolve,reject,timer});child.stdio[3].write(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})})+'\0');
  });
  try{
   if(signal?.aborted)throw new Error('검사가 취소되었습니다.');
   child=spawn(executable,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-extensions',...(process.platform==='linux'&&process.getuid?.()===0?['--no-sandbox']:[]),'--user-data-dir='+profile,'--remote-debugging-pipe','about:blank'],{stdio:['ignore','ignore','ignore','pipe','pipe'],windowsHide:true});
-  child.once('error',error=>failAll(Object.assign(error,{unavailable:true})));child.once('exit',()=>failAll(new Error('검사 브라우저가 종료되었습니다.')));
+  child.once('error',error=>failAll(Object.assign(error,{unavailable:true})));child.once('exit',()=>failAll(Object.assign(new Error('검사 브라우저가 종료되었습니다.'),{unavailable:true})));
   signal?.addEventListener('abort',abort,{once:true});child.stdio[3].on('error',failAll);
   child.stdio[4].on('data',chunk=>{buffer+=chunk.toString();if(buffer.length>2000000){failAll(new Error('브라우저 검사 응답이 너무 큽니다.'));child.kill();return;}let index;while((index=buffer.indexOf('\0'))>=0){const raw=buffer.slice(0,index);buffer=buffer.slice(index+1);let message;try{message=JSON.parse(raw);}catch{continue;}const eventKey=message.sessionId+':'+message.method,event=events.get(eventKey);if(event){events.delete(eventKey);clearTimeout(event.timer);event.resolve(message.params);}if(message.method==='Runtime.exceptionThrown')runtimeErrors.push(message.params.exceptionDetails.text||'JavaScript exception');const pending=requests.get(message.id);if(pending){clearTimeout(pending.timer);requests.delete(message.id);message.error?pending.reject(new Error(message.error.message)):pending.resolve(message.result);}}});
   for(const check of checks){
@@ -45,7 +45,7 @@ export async function browserChecks(url,checks,{signal}={}){
     if(evaluated.exceptionDetails)throw new Error(evaluated.exceptionDetails.exception?.description||evaluated.exceptionDetails.text);
     if(runtimeErrors.length>startErrors)throw new Error('페이지 JavaScript 오류: '+runtimeErrors.slice(startErrors).join('; '));
     results.push({label:check.name,passed:true,exitCode:0,output:evaluated.result.value});
-   }catch(error){if(signal?.aborted)throw error;results.push({label:check.name,passed:false,exitCode:1,output:error.message});}
+   }catch(error){if(signal?.aborted)throw error;results.push({label:check.name,passed:false,exitCode:error.unavailable?null:1,failureKind:error.unavailable?'environment':'assertion',output:error.message});}
    finally{if(targetId&&!failure)await command('Target.closeTarget',{targetId}).catch(()=>{});}
   }
   return results;

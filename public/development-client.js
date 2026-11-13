@@ -1,4 +1,4 @@
-import {runner,isLocal} from './agent-client.js?v=0.9.5';
+import {runner,isLocal} from './agent-client.js?v=0.10.0';
 
 const ROOT='/api/agents/development';
 const identifier=value=>{if(!/^[\w-]{1,80}$/.test(value||''))throw new Error('프로젝트 또는 실행 기록의 ID가 올바르지 않습니다.');return encodeURIComponent(value);};
@@ -27,6 +27,7 @@ export class DevelopmentClient{
   cancel(projectId,requestId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/cancel',{method:'POST',body:requestId?{requestId}:{}});}
   accept(projectId,payload){return this.runner.request(ROOT+'/'+identifier(projectId)+'/accept',{method:'POST',body:payload});}
   launch(projectId,releaseId,requestId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/launch',{method:'POST',body:requestId?{requestId}:{},timeoutMs:0});}
+  stop(projectId,releaseId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/stop',{method:'POST',body:{}});}
   async download(projectId,releaseId){
     const path=ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/download';
     const fetchBlob=()=>this.runner.fetcher(this.runner.base+path,{headers:{'X-Agent-Desk':'agent-runner',Authorization:'Bearer '+this.runner.token},cache:'no-store'});
@@ -37,7 +38,7 @@ export class DevelopmentClient{
   }
   watch(projectId,onState,onError=()=>{}){
     let closed=false,timer;
-    const poll=async()=>{try{const state=await this.get(projectId);if(!closed)onState(state);}catch(error){if(!closed)onError(error);}finally{if(!closed)timer=setTimeout(poll,this.pollMs);}};
+    const poll=async()=>{try{const state=await this.get(projectId);if(!closed)onState(state);}catch(error){if(!closed)onError(error);}finally{if(!closed)timer=setTimeout(poll,this.pollMs);timer?.unref?.();}};
     poll();return()=>{closed=true;clearTimeout(timer);};
   }
 }

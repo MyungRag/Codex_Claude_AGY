@@ -14,7 +14,7 @@ test('project planning UI edits, inserts, removes, merges, exchanges feedback, r
   window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
   window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new window.Event('close'));};
   let clipboard='';Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async text=>{clipboard=text;}}}});
-  const storage=await import('../public/storage.js?v=0.9.5');await storage.openStore();
+  const storage=await import('../public/storage.js?v=0.10.0');await storage.openStore();
   await storage.saveState({projects:[validateProject({id:'kaf',name:'KAF',description:'대한항공의 가격 비교 프로그램 만들기',instructions:'한국어로 설명해 주세요.'})]},0);
   await import('../public/app.js');
   const $=selector=>document.querySelector(selector),click=selector=>{assert.ok($(selector),selector);$(selector).click();};

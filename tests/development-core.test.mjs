@@ -35,9 +35,9 @@ test('overall lead is independent, overrides inherit defaults and custom budgets
  for(const limits of [{maxRevisions:-1},{maxReviews:0},{maxSwitches:1.5},{maxRevisions:Infinity}])assert.throws(()=>validateDevelopment({...config,limits}),/한도/);
 });
 
-test('primary or inherited self-review, invalid providers and unknown strategies are rejected',()=>{
- assert.throws(()=>validateDevelopment({roles:{auditor:'codex'}}),/서로 다른/);
- assert.throws(()=>validateDevelopment({overrides:{issue:{builder:'claude'}}}),/서로 다른/);
+test('self-review is allowed while invalid providers and unknown strategies are rejected',()=>{
+ assert.equal(validateDevelopment({roles:{auditor:'codex'}}).roles.auditor,'codex');
+ assert.equal(validateDevelopment({overrides:{issue:{builder:'claude'}}}).overrides.issue.builder,'claude');
  assert.throws(()=>validateDevelopment({overrides:{unknown:{}}}),/협업 방식/);
  assert.throws(()=>validateDevelopment({lead:'invented'}),/AI/);
  assert.throws(()=>validateDevelopment({strategy:'unknown'}),/협업 방식/);
@@ -125,8 +125,8 @@ test('role rotation preserves independent audit and configurable global switchin
  assert.equal(rotation.allowed,true);assert.deepEqual(rotation.roles,{builder:'claude',auditor:'agy',challenger:'codex'});
  assert.equal(rotateRoles(config,{authors:['codex'],switchCount:1}).allowed,false);
  assert.equal(rotateRoles({...config,limits:{...config.limits,maxSwitches:2}},{authors:['codex'],switchCount:1}).allowed,true);
- const own=rotateRoles(config,{authors:['codex','agy'],switchCount:0});assert.equal(own.allowed,false);assert.match(own.reason,/자신의 코드/);
+ const own=rotateRoles(config,{authors:['codex','agy'],switchCount:0});assert.equal(own.allowed,true);
  const next={...config,roles:rotation.roles,limits:{...config.limits,maxSwitches:3}};
- assert.equal(rotateRoles(next,{authors:['codex','claude'],switchCount:1}).allowed,false,'a new session does not make the original author independent');
+ assert.equal(rotateRoles(next,{authors:['codex','claude'],switchCount:1}).allowed,true,'review provenance is tracked at execution rather than rejecting the role');
  assert.deepEqual(config.roles,{builder:'codex',auditor:'claude',challenger:'agy'});
 });

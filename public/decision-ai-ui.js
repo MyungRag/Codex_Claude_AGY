@@ -1,13 +1,18 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.9.5';
-import {decisionPrompt} from './decision-model.js?v=0.9.5';
-import {questionSynthesisPrompt,questionSynthesisRepairPrompt,validateQuestionSynthesis} from './review-model.js?v=0.9.5';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.5';
-import {decisionTypes} from './decision-core.js?v=0.9.5';
-import {esc,jobMetadataHTML} from './model-controls.js?v=0.9.5';
+import {openLeadReview} from './lead-review-ui.js?v=0.10.0';
+import {decisionPrompt} from './decision-model.js?v=0.10.0';
+import {questionSynthesisPrompt,questionSynthesisRepairPrompt,validateQuestionSynthesis} from './review-model.js?v=0.10.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.10.0';
+import {decisionTypes,changedQuestionNodes} from './decision-core.js?v=0.10.0';
+import {esc,jobMetadataHTML} from './model-controls.js?v=0.10.0';
 export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onApply,onClose,getApplyDiagnostics=()=>({})}){
  if(document.querySelector('.agent-dialog')){onClose();return;}
  // Older cached responses retain their original apply path; new reviews always use lead synthesis.
  let legacy=false;try{const saved=JSON.parse(sessionStorage.getItem('agent-desk-decisions-'+project.id+'-questions')||'null');legacy=!!saved?.jobs?.length&&!saved.version;}catch{}
+ if(kind==='questions'&&!legacy){
+  let saved;try{saved=JSON.parse(sessionStorage.getItem('agent-desk-decisions-'+project.id+'-questions')||'null');}catch{}
+  nodeIds=changedQuestionNodes(plan,nodeIds);
+  if(!nodeIds.length&&!saved?.jobs?.length){const notice=document.createElement('dialog');notice.className='agent-dialog';notice.innerHTML='<header><h2>변경된 질문 검토 대상 없음</h2></header><div class="agent-dialog-body"><p>추가되거나 내용이 변경된 노드가 없습니다. 기존 질문과 답변을 유지합니다.</p><button class="button primary">확인</button></div>';const close=()=>{notice.close();notice.remove();onClose();};notice.addEventListener('cancel',e=>{e.preventDefault();close();});notice.querySelector('button').onclick=close;document.body.append(notice);notice.showModal();return;}
+ }
  if(kind==='questions'&&!legacy)return openLeadReview({project,plan,kind,nodeIds,onClose,
   prompt:(instruction,scope)=>decisionPrompt(project,plan,'questions',scope)+'\n사용자 추가 요구: '+instruction+'\n사용자 대화: '+JSON.stringify(plan.messages.filter(m=>m.author==='user')),
   synthesize:(jobs,instruction,scope)=>questionSynthesisPrompt(project,plan,scope,jobs,instruction),
@@ -29,7 +34,7 @@ export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onAppl
  const settle=async job=>{try{Object.assign(job,await runner.pollPending(job,()=>render(),{refreshInBackground:true}));}catch(e){job.status=e.status===404?'failed':'unknown';job.error=e.message;}save();render();};
  el.addEventListener('toggle',e=>{if(e.target.matches('.decision-diagnostics')&&e.target.open)el.querySelector('[data-dai-diagnostics]').value=JSON.stringify(diagnostics(),null,2);},true);
  el.addEventListener('cancel',e=>{e.preventDefault();close();});el.addEventListener('change',e=>{if(e.target.dataset.daiInclude){pending.jobs.find(j=>j.agent===e.target.dataset.daiInclude).include=e.target.checked;save();el.querySelector('[data-dai="apply"]').disabled=busy||active()||!pending.jobs.some(j=>j.status==='succeeded'&&j.include!==false);}});
- el.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;const agents=new FormData(e.target).getAll('agents');if(!agents.length){error='AI 연결에서 에이전트를 연결하고 선택해 주세요.';render();return;}busy=true;error='';pending.jobs=agents.map(agent=>({agent,status:'running',requestId:crypto.randomUUID()}));save();render();await Promise.all(pending.jobs.map(async job=>{try{Object.assign(job,await runner.startPending(job,prompt,kind));}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;}save();render();}));await Promise.all(pending.jobs.filter(j=>j.id&&j.status==='running').map(settle));busy=false;render();});
+ el.addEventListener('submit',async e=>{e.preventDefault();if(busy)return;const agents=new FormData(e.target).getAll('agents');if(!agents.length){error='AI 연결에서 에이전트를 연결하고 선택해 주세요.';render();return;}busy=true;error='';pending.jobs=agents.map(agent=>({agent,status:'running',requestId:crypto.randomUUID()}));save();render();await Promise.all(pending.jobs.map(async job=>{try{job.context={projectId:project.id};Object.assign(job,await runner.startPending(job,prompt,kind));}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;}save();render();}));await Promise.all(pending.jobs.filter(j=>j.id&&j.status==='running').map(settle));busy=false;render();});
  el.addEventListener('click',async e=>{const action=e.target.closest('[data-dai]')?.dataset.dai;if(action==='close')close();
   if(action==='lead-upgrade'&&!busy&&!active()){sessionStorage.setItem(key,JSON.stringify({version:1,autoMerge:false,baseChange:pending.baseChange,nodeIds:pending.nodeIds,lead:project.development?.lead||'codex',instruction:'',jobs:pending.jobs,merge:null,edits:{}}));el.close();el.remove();return openDecisionAI({project,plan,kind,nodeIds,prompt,onApply,onClose,getApplyDiagnostics});}
   if(action==='copy-diagnostics'){const field=el.querySelector('[data-dai-diagnostics]'),status=el.querySelector('[data-dai-copy-status]');field.value=JSON.stringify(diagnostics(),null,2);try{await navigator.clipboard.writeText(field.value);status.textContent='진단 내용을 복사했습니다. 채팅에 붙여넣어 주세요.';}catch{field.focus();field.select();status.textContent='진단 내용이 선택되었습니다. Ctrl+C로 복사한 뒤 채팅에 붙여넣어 주세요.';}return;}

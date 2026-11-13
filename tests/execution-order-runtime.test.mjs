@@ -32,7 +32,7 @@ async function runner(t){
  const dataRoot=await mkdtemp(path.join(os.tmpdir(),'execution-order-')),sha='a'.repeat(40),calls=[];
  const workspace={create:async()=>({path:'/tmp/order-candidate'}),commit:async()=>sha,context:async()=>({files:[]}),apply:async(_candidate,files)=>({changedPaths:files.map(f=>f.path)}),check:async()=>[{passed:true,exitCode:0,output:'fixture passed',label:'fixture check',codeSha:sha}]};
  const runtime=new DevelopmentRunner({agentRunner:{},workspace,dataRoot});
- runtime._release=async()=>{};
+ runtime._release=async()=>{};runtime._assembleDraft=async()=>{}; // This fixture isolates node scheduling from final runnable assembly.
  runtime._ai=async(_state,_attempt,_operation,provider,kind,payload)=>{
   calls.push({provider,kind,payload:structuredClone(payload)});
   if(kind==='development-build')return {summary:'fixture implementation',files:[{path:payload.task.id+'.js',action:'write',content:'export const ready = true;'}],limitations:[]};
@@ -83,9 +83,9 @@ test('manual handoff save keeps execution metadata and order, with explicit repa
 test('actual host dispatch respects cross-hierarchy prerequisites before order and sends steps to Builder/Auditor',async t=>{
  const {runtime,calls}=await runner(t),payload=input(fixture());const state=await done(runtime,payload);
  assert.equal(state.status,'completed');assert.ok(state.tasks.every(t=>t.status==='passed'));
- const builds=calls.filter(c=>c.kind==='development-build');assert.deepEqual(builds.map(c=>c.payload.task.id),['z-core','m-domain','a-ui','b-independent']);
- assert.deepEqual(builds[2].payload.task.dependsOn,['m-domain']);assert.deepEqual(builds[2].payload.task.functionSteps,['입력 검증','도메인 결과 표시']);
- assert.deepEqual(calls.find(c=>c.kind==='development-audit'&&c.payload.task.id==='a-ui').payload.task.functionSteps,builds[2].payload.task.functionSteps);
+ const builds=calls.filter(c=>c.kind==='development-build');assert.deepEqual(builds.map(c=>c.payload.task.id),['z-core','b-independent','m-domain','a-ui']);
+ assert.deepEqual(builds[3].payload.task.dependsOn,['m-domain']);assert.deepEqual(builds[3].payload.task.functionSteps,['입력 검증','도메인 결과 표시']);
+ assert.deepEqual(calls.find(c=>c.kind==='development-audit'&&c.payload.task.id==='a-ui').payload.task.functionSteps,builds[3].payload.task.functionSteps);
  const retry=structuredClone(payload);retry.requestId=randomUUID();retry.retry=true;retry.handoff.tasks.find(t=>t.nodeId==='z-core').functionSteps.push('추가 계약 검사');
  const preview=await runtime.preview(retry);assert.equal(preview.entries.find(e=>e.taskId==='z-core').action,'build');assert.equal(preview.entries.find(e=>e.taskId==='a-ui').action,'verify');
 });
@@ -127,5 +127,5 @@ test('failed final prerequisite audit invalidates a downstream task already audi
  workspace.apply=async(_candidate,files)=>{version++;return {changedPaths:files.map(f=>f.path)};};workspace.commit=async()=>sha();workspace.check=async()=>[{passed:true,exitCode:0,output:'fixture passed',label:'fixture',codeSha:sha()}];
  const original=runtime._ai.bind(runtime);runtime._ai=async(...args)=>{const result=await original(...args),kind=args[4],context=args[5];if(kind==='development-audit'&&context.task.id==='z-core'&&version===2)return {...result,verdict:'fail',findings:[{type:'implementation',severity:'high',summary:'Final integration broke core',evidence:'fixture regression',remedy:'repair integration'}]};return result;};
  const state=await done(runtime,payload),core=state.tasks.find(task=>task.id==='z-core'),ui=state.tasks.find(task=>task.id==='a-ui');
- assert.equal(core.status,'failed');assert.equal(ui.status,'blocked');assert.equal(ui.needsVerification,true);assert.equal(ui.audit.codeSha,sha());assert.equal(ui.audit.verdict,'pass');assert.match(ui.error,/최종 검증/);
+ assert.equal(core.status,'failed');assert.equal(ui.status,'blocked');assert.equal(ui.needsVerification,true);assert.equal(ui.audit.codeSha,sha());assert.equal(ui.audit.verdict,'pass');assert.match(ui.error,/필수 결과물/);
 });

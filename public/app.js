@@ -1,8 +1,9 @@
-import {openConnections} from './agent-ui.js?v=0.9.5';
-import {mountPlanner} from './planning.js?v=0.9.5';
-import {mountDevelopment} from './development.js?v=0.9.5';
-import {COLORS,MAX_FILE_BYTES,MAX_PROJECTS,validateProject,readBackup,importCopies,selectProjects} from './model.js?v=0.9.5';
-import {openStore,readState,saveState} from './storage.js?v=0.9.5';
+import {mountActivityBanner} from './execution-monitor.js?v=0.10.0';
+import {openConnections} from './agent-ui.js?v=0.10.0';
+import {mountPlanner} from './planning.js?v=0.10.0';
+import {mountDevelopment} from './development.js?v=0.10.0';
+import {COLORS,MAX_FILE_BYTES,MAX_PROJECTS,validateProject,readBackup,importCopies,selectProjects} from './model.js?v=0.10.0';
+import {openStore,readState,saveState} from './storage.js?v=0.10.0';
 
 const $ = (selector, root=document) => root.querySelector(selector);
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -39,9 +40,10 @@ fetch('/api/capabilities',{cache:'no-store',signal:AbortSignal.timeout(2500)}).t
   if(response.ok&&response.headers.get('content-type')?.includes('application/json')) nativePicker=(await response.json()).folderPicker==='native';
 }).catch(()=>{});
 const channel = typeof BroadcastChannel==='function' ? new BroadcastChannel('agent-desk-projects') : null;
-let planner=null,developmentView=null;
+let planner=null,developmentView=null,stopActivityBanner=null;
 const isPlanning=()=>location.hash.endsWith('/planning');
-const isDevelopment=()=>location.hash.endsWith('/development');
+const isActivity=()=>location.hash.endsWith('/activity');
+const isDevelopment=()=>location.hash.endsWith('/development')||isActivity();
 const activeProject = () => state.projects.find(p=>p.id===location.hash.slice(1).split('/')[0]);
 async function commit(projects, revision=state.revision, folderUpdates=[],redraw=true) {
   const next = await saveState({projects},revision,folderUpdates);
@@ -68,7 +70,7 @@ function shell() {
     <div class="sidebar-bottom"><div class="agent-row"><span class="agent-symbol mint">C</span><span class="agent-symbol orange">✳</span><span class="agent-symbol blue">A</span></div><p>세 에이전트, 하나의 공간.</p><small>Codex · Claude · Antigravity</small><div class="storage-indicator"><span></span>이 브라우저에 저장됨</div></div>
   </aside>
   <div class="main-wrap"><header class="topbar"><div class="breadcrumb">워크스페이스<span>/</span><button data-action="list">프로젝트</button>${active?`<span>/</span><strong>${esc(active.name)}</strong>`:''}</div><div class="topbar-actions"><button class="button compact" data-action="agents">${icon('link')}AI 연결</button><div class="pc-select current-device">${icon('monitor')}<span>현재 PC</span></div></div></header>
-  <main id="main" class="${active&&(isPlanning()||isDevelopment())?'planning-main':''}" tabindex="-1">${active?`<div class="project-subnav"><button data-action="overview" data-id="${active.id}" class="${!isPlanning()&&!isDevelopment()?'active':''}">${icon('folder')}프로젝트 정보</button><button data-action="planning" data-id="${active.id}" class="${isPlanning()?'active':''}">${icon('layers')}기획 보드</button><button data-action="development" data-id="${active.id}" class="${isDevelopment()?'active':''}">${icon('check')}개발·검토</button><span>아이디어에서 실행 가능한 결과까지</span></div>${isPlanning()?'<div id="planning-root"></div>':isDevelopment()?'<div id="development-root"></div>':detail(active)}`:list()}</main><footer class="page-footer"><span>Agent Desk <span class="muted">/</span> 프로젝트 · 기획 · 개발·검토 <small class="app-version">v0.9.5</small></span><a href="/download.html">${icon('download')} Windows 다운로드</a><button data-action="storage-info">${icon('info')}다른 PC에서 이어하기</button></footer></div>`;
+  <main id="main" class="${active&&(isPlanning()||isDevelopment())?'planning-main':''}" tabindex="-1">${active?`<div class="project-subnav"><button data-action="overview" data-id="${active.id}" class="${!isPlanning()&&!isDevelopment()?'active':''}">${icon('folder')}프로젝트 정보</button><button data-action="planning" data-id="${active.id}" class="${isPlanning()?'active':''}">${icon('layers')}기획 보드</button><button data-action="development" data-id="${active.id}" class="${isDevelopment()&&!isActivity()?'active':''}">${icon('check')}개발·검토</button><button data-action="activity" data-id="${active.id}" class="${isActivity()?'active':''}">${icon('monitor')}AI 실행 확인</button><span>아이디어에서 실행 가능한 결과까지</span></div><div id="global-ai-status"></div>${isPlanning()?'<div id="planning-root"></div>':isDevelopment()?'<div id="development-root"></div>':detail(active)}`:list()}</main><footer class="page-footer"><span>Agent Desk <span class="muted">/</span> 프로젝트 · 기획 · 개발·검토 <small class="app-version">v0.10.0</small></span><a href="/download.html">${icon('download')} Windows 다운로드</a><button data-action="storage-info">${icon('info')}다른 PC에서 이어하기</button></footer></div>`;
 }
 function list() {
   const projects=selectProjects(state.projects,{query,filter,sort});
@@ -100,9 +102,10 @@ function detail(p) {
     <section class="panel project-info"><h2>프로젝트 정보</h2><dl><div><dt>등록일</dt><dd>${formatDate(p.createdAt)}</dd></div><div><dt>마지막 수정</dt><dd>${formatDate(p.updatedAt)}</dd></div><div><dt>저장 위치</dt><dd>이 브라우저</dd></div></dl><button class="text-button" data-action="export-one" data-id="${p.id}">${icon('download')}프로젝트·기획 백업</button><button class="text-button" data-action="archive" data-id="${p.id}">${icon(p.archived?'restore':'archive')}${p.archived?'프로젝트 복원':'보관함으로 이동'}</button><button class="text-button delete-project" data-action="delete" data-id="${p.id}">${icon('trash')}프로젝트 삭제</button></section></aside></div>`;
 }
 function render(){
-  planner?.destroy();planner=null;developmentView?.destroy();developmentView=null;
+  stopActivityBanner?.();stopActivityBanner=null;planner?.destroy();planner=null;developmentView?.destroy();developmentView=null;
   $('#app').innerHTML=shell();
   const project=activeProject();
+  if(project&&$('#global-ai-status'))stopActivityBanner=mountActivityBanner($('#global-ai-status'),project.id);
   if(project&&isPlanning())planner=mountPlanner($('#planning-root'),{
     project,revision:state.revision,toast,icon,exportProject:()=>exportProjects([state.projects.find(p=>p.id===project.id)]),
     save:async(planning,expectedRevision)=>{
@@ -111,7 +114,7 @@ function render(){
       return state.revision;
     }
   });
-  if(project&&isDevelopment())developmentView=mountDevelopment($('#development-root'),{
+  if(project&&isDevelopment())developmentView=mountDevelopment($('#development-root'),{initialPage:isActivity()?'activity':'method',
     project,revision:state.revision,toast,icon,exportProject:()=>exportProjects([state.projects.find(p=>p.id===project.id)]),
     goPlanning:()=>{if(developmentView&&!developmentView.canLeave())return;history.pushState(null,'',`#${project.id}/planning`);render();},
     save:async(development,expectedRevision)=>{
@@ -232,7 +235,7 @@ document.addEventListener('click',async event=>{
     else if(action==='archive-list')goList('archive');
     else if(action==='new')openEditor();
     else if(action==='edit')openEditor(id);
-    else if(['planning','overview','development'].includes(action)){history.pushState(null,'',`#${id}${action==='overview'?'':'/'+action}`);render();}
+    else if(['planning','overview','development','activity'].includes(action)){history.pushState(null,'',`#${id}${action==='overview'?'':'/'+action}`);render();}
     else if(action==='open')await openProject(id);
     else if(action==='pick-folder')await chooseFolder(el.dataset.profile,el);
     else if(action==='delete'&&p)confirmDelete(p);
