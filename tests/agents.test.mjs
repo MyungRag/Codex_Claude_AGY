@@ -115,3 +115,34 @@ test('hidden AGY help flags do not claim an outdated CLI; explicit response test
 test('all CLI adapters accept separate questions, conflicts and handoff response schemas and account for usage',async()=>{
  const runner=make();try{await runner.status();for(const kind of ['questions','conflicts','handoff']){const jobs=['codex','claude','agy'].map(agent=>runner.create({agent,kind,prompt:'기획 검토',requestId:crypto.randomUUID()}));const done=await Promise.all(jobs.map(j=>completed(runner,j)));for(const job of done){assert.equal(job.status,'succeeded',job.error);assert.ok(job.usage);if(kind==='handoff')assert.equal(job.result.tasks[0].nodeId,'work-a');else assert.equal(job.result.items[0].question,'어떤 가격을 비교할까요?');}}}finally{await runner.close();}
 });
+
+
+test('request-ID cancellation prevents late dispatch, stops an existing job, and keeps bounded tombstones',async t=>{
+ let runs=0;const runner=new AgentRunner({resolve,run:(...args)=>{runs++;return runProcess(...args);}});t.after(()=>runner.close());
+ const early=crypto.randomUUID();assert.deepEqual(runner.cancelRequest(early),{requestId:early,status:'cancelled'});
+ const cancelled=send(runner,'agy','fixture:hang',early);assert.equal(cancelled.status,'cancelled');await runner.jobs.get(cancelled.id).done;
+ assert.equal(runs,0);assert.equal(runner.jobs.get(cancelled.id).dispatched,undefined);
+ assert.equal(send(runner,'agy','fixture:hang',early).id,cancelled.id);
+ assert.throws(()=>runner.cancelRequest('bad'),/식별자/);
+ await runner.status();const running=send(runner,'claude','fixture:hang');
+ for(let i=0;i<100&&runner.get(running.id).progress?.phase!=='receiving';i++)await new Promise(resolve=>setTimeout(resolve,5));
+ assert.equal(runner.cancelRequest(running.requestId).id,running.id);await runner.jobs.get(running.id).done;
+ assert.equal(runner.get(running.id).status,'cancelled');
+ runner.cancelledRequests.set('expired-request',Date.now()-3600001);
+ for(let i=0;i<305;i++)runner.cancelRequest('request-'+i);
+ assert.equal(runner.cancelledRequests.has('expired-request'),false);assert.equal(runner.cancelledRequests.size,300);
+});
+
+test('request-ID cancellation API requires authentication and cancels a create request that arrives later',async t=>{
+ const runner=make(),server=createAppServer({agentRunner:runner});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{await runner.close();await new Promise(resolve=>server.close(resolve));});
+ const base='http://127.0.0.1:'+server.address().port,requestId=crypto.randomUUID(),endpoint=base+'/api/agents/requests/'+requestId+'/cancel';
+ assert.equal((await fetch(endpoint,{method:'POST',headers:{'X-Agent-Desk':'agent-runner'}})).status,401);
+ const token=(await (await fetch(base+'/api/agents/session',{headers:{'X-Agent-Desk':'agent-runner'}})).json()).token;
+ const headers={'X-Agent-Desk':'agent-runner',Authorization:'Bearer '+token,'Content-Type':'application/json'};
+ assert.equal((await fetch(endpoint,{method:'POST',headers:{...headers,Origin:'https://evil.example'}})).status,403);
+ const cancelled=await fetch(endpoint,{method:'POST',headers});assert.equal(cancelled.status,200);assert.deepEqual(await cancelled.json(),{requestId,status:'cancelled'});
+ const response=await fetch(base+'/api/agents/jobs',{method:'POST',headers,body:JSON.stringify({agent:'agy',prompt:'fixture:hang',requestId})});
+ assert.equal(response.status,202);const job=await response.json();assert.equal(job.status,'cancelled');assert.equal(runner.jobs.get(job.id).dispatched,undefined);
+ const status=await (await fetch(base+'/api/agents/status',{headers})).json();assert.equal(status.features.unlimitedWait,true);assert.equal(status.features.requestCancellation,true);
+});

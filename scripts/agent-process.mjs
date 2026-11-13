@@ -19,7 +19,7 @@ export async function resolveAgent(agent,{platform=process.platform,env=process.
   }
   return null;
 }
-export function runProcess(executable,args,{input='',cwd,signal,timeout=300000,maxBytes=4*1024*1024,env=process.env,onStdout}={}){
+export function runProcess(executable,args,{input='',cwd,signal,timeout=0,maxBytes=4*1024*1024,env=process.env,onStdout}={}){
   return new Promise((resolve,reject)=>{
     if(signal?.aborted){reject(new Error('요청을 취소했습니다.'));return;}
     const child=spawn(executable.command,[...executable.prefix,...args],{cwd,env,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['pipe','pipe','pipe']});
@@ -28,7 +28,7 @@ export function runProcess(executable,args,{input='',cwd,signal,timeout=300000,m
     const stop=(message,code)=>{if(failure)return;failure=Object.assign(new Error(message),{code});kill();};
     const abort=()=>stop('요청을 취소했습니다.');signal?.addEventListener('abort',abort,{once:true});
     const duration=timeout>=60000?(timeout/60000)+'분':(timeout/1000)+'초';
-    const timer=setTimeout(()=>stop('응답 제한 시간 '+duration+'을 초과해 요청을 중단했습니다. 시간 초과만으로 로그인 실패나 모델 미지원을 판단할 수 없습니다. 진행 상태를 확인하고 최대 대기 시간을 늘리거나 추론 강도를 조정해 다시 요청해 주세요.','AGENT_TIMEOUT'),timeout);
+    const timer=timeout>0?setTimeout(()=>stop('응답 제한 시간 '+duration+'을 초과해 요청을 중단했습니다. 시간 초과만으로 로그인 실패나 모델 미지원을 판단할 수 없습니다. 진행 상태를 확인하고 최대 대기 시간을 늘리거나 추론 강도를 조정해 다시 요청해 주세요.','AGENT_TIMEOUT'),timeout):null;
     const clean=()=>{clearTimeout(timer);clearTimeout(killTimer);signal?.removeEventListener('abort',abort);};
     child.on('error',error=>{clean();const failure=new Error(error.code==='ENOENT'?'CLI를 찾을 수 없습니다. 설치 후 실행기를 다시 시작해 주세요.':'CLI를 실행할 수 없습니다. 실행 파일과 권한을 확인해 주세요.');failure.code=error.code||'SPAWN_FAILED';reject(failure);});
     for(const [stream,key] of [[child.stdout,'out'],[child.stderr,'err']]){stream.setEncoding('utf8');stream.on('data',chunk=>{size+=Buffer.byteLength(chunk);if(size>maxBytes){stop('CLI 응답이 허용 크기를 초과했습니다.');return;}if(key==='out'){stdout+=chunk;onStdout?.(chunk);}else stderr+=chunk;});}
@@ -59,7 +59,7 @@ export function readCodexModels(executable,{timeout=15000,signal}={}){
     if(message.id===0){send({method:'initialized'});next();}
     else if(message.id===pages){if(!Array.isArray(message.result?.data)){finish(new Error('모델 목록 형식이 지원되지 않습니다.'));return;}models.push(...message.result.data);const cursor=message.result.nextCursor;if(cursor&&pages<5&&!seen.has(cursor)){seen.add(cursor);next(cursor);}else{finish();return;}}
    }
-  });send({id:0,method:'initialize',params:{clientInfo:{name:'agent_desk',version:'0.7.0'}}});
+  });send({id:0,method:'initialize',params:{clientInfo:{name:'agent_desk',version:'0.8.0'}}});
  });
 }
 

@@ -1,4 +1,5 @@
-import {validatePlan} from './planning-model.js?v=0.7.0';
+import {validateDevelopment} from './development-core.js?v=0.8.0';
+import {validatePlan} from './planning-model.js?v=0.8.0';
 export const COLORS = ['mint', 'blue', 'orange', 'violet', 'pink'];
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
@@ -64,7 +65,7 @@ export function validateProject(input) {
   return {
     id: typeof input.id === 'string' && /^[\w-]{1,80}$/.test(input.id) ? input.id : crypto.randomUUID(),
     name, description:text(input.description ?? '', 1000, '프로젝트 설명'), instructions:text(input.instructions ?? '', 12000, '공통 지침'),
-    planning:validatePlan(input.planning),
+    planning:validatePlan(input.planning), development:validateDevelopment(input.development),
     paths, folderNames, gitUrl:gitRepositoryUrl(input.gitUrl), links, files:checkedFiles, color:COLORS.includes(input.color) ? input.color : 'mint', pinned:input.pinned === true, archived:input.archived === true,
     createdAt:date(input.createdAt,now), updatedAt:date(input.updatedAt,now), lastOpenedAt:date(input.lastOpenedAt,null)
   };

@@ -10,7 +10,7 @@ export function validateSettings(agent,value={}){
  const model=value.model??'',effort=value.effort??'';
  if(typeof model!=='string'||(model!==''&&!/^[a-zA-Z0-9][a-zA-Z0-9._:/@\[\]-]{0,159}$/.test(model)))throw new Error('모델 ID는 영문·숫자와 . _ : / @ [ ] -만 사용할 수 있습니다.');
  if(typeof effort!=='string'||(effort!==''&&![...EFFORTS[agent],...(agent==='codex'?['none','minimal']:[])].includes(effort)))throw new Error('지원하지 않는 추론 강도입니다.');
- const waitMinutes=value.waitMinutes;if(waitMinutes!==undefined&&![5,10,20].includes(waitMinutes))throw new Error('최대 대기 시간은 5분, 10분, 20분 중에서 선택해 주세요.');
+ const waitMinutes=value.waitMinutes;if(waitMinutes!==undefined&&![0,5,10,20].includes(waitMinutes))throw new Error('최대 대기 시간은 무제한, 5분, 10분, 20분 중에서 선택해 주세요.');
  return {model,effort,...(waitMinutes!==undefined?{waitMinutes}:{})};
 }
 // Syntax validation is separate from capabilities. A global list of effort names

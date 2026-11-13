@@ -21,7 +21,7 @@ test('questions page reviews three agents, previews partial success, confirms in
  for(const k of ['window','document','localStorage','sessionStorage','history','location','FormData'])globalThis[k]=k==='window'?window:window[k];globalThis.indexedDB=new IDBFactory();globalThis.BroadcastChannel=undefined;globalThis.fetch=(url,opts)=>nativeFetch(new URL(url,base),opts);
  window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
  let downloaded;URL.createObjectURL=blob=>{downloaded=blob;return 'blob:test';};URL.revokeObjectURL=()=>{};window.HTMLAnchorElement.prototype.click=function(){};
- const storage=await import('../public/storage.js?v=0.7.0');await storage.openStore();const project=validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교'});project.planning=createPlan(project);const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',instructions:'최종 가격 비교',criteria:'세금 포함 가격'});project.planning.edges[0].to='work-a';work.id='work-a';await storage.saveState({projects:[project]},0);await import('../public/app.js');
+ const storage=await import('../public/storage.js?v=0.8.0');await storage.openStore();const project=validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교'});project.planning=createPlan(project);const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',instructions:'최종 가격 비교',criteria:'세금 포함 가격'});project.planning.edges[0].to='work-a';work.id='work-a';await storage.saveState({projects:[project]},0);await import('../public/app.js');
  const $=s=>document.querySelector(s),click=s=>{assert.ok($(s),s);$(s).click();},fill=(s,v)=>{assert.ok($(s),s);$(s).value=v;$(s).dispatchEvent(new window.Event('input',{bubbles:true}));},submit=(s,action)=>$(s).dispatchEvent(new window.SubmitEvent('submit',{bubbles:true,cancelable:true,submitter:action?$(s+` [value="${action}"]`):null}));const saved=async()=>(await storage.readState()).projects[0].planning;const waitSave=async old=>until(async()=> (await saved()).changeNumber>old&&!$('#planning-root[aria-busy]'));
  click('[data-action="open"][data-id="kaf"]');await until(()=>location.hash==='#kaf');click('[data-action="planning"]');click('[data-pa="page-decisions"]');assert.ok($('.decision-workspace'));assert.equal(document.querySelectorAll('[role="tab"]').length,3);
  click('[data-dec="ai-questions"]');await until(()=>$('#decision-ai-form')&&!$('#decision-ai-form .primary').disabled);submit('#decision-ai-form');await until(()=>$('[data-dai="apply"]')&&!$('[data-dai="apply"]').disabled);
@@ -36,4 +36,38 @@ test('questions page reviews three agents, previews partial success, confirms in
  click('[data-pa="page-board"]');click('[data-pa="edit"][data-id="work-a"]');fill('#node-editor [name="title"]','다구간 가격 비교');submit('#node-editor');await waitSave(p.changeNumber);p=await saved();assert.equal(p.items[0].status,'check');assert.equal(p.items[0].answer,'세금과 수수료 포함 최종 가격');
  click('[data-pa="page-decisions"]');click('[data-dec="tab"][data-tab="check"]');assert.match($('.decision-detail').textContent,/기존 답변이 유효/);click('[data-pa="undo"]');await waitSave(p.changeNumber);p=await saved();assert.equal(p.items[0].status,'done');
  click('[data-dec="ai-questions"]');await until(()=>$('#decision-ai-form')&&!$('#decision-ai-form .primary').disabled);submit('#decision-ai-form');await until(()=>$('[data-dai="apply"]')&&!$('[data-dai="apply"]').disabled);const state=await storage.readState();await storage.saveState({...state,projects:state.projects.map(p=>({...p,description:'다른 탭 변경'}))},state.revision);click('[data-dai="apply"]');await until(()=>$('.agent-error')?.textContent.includes('저장하지 못했습니다'));assert.equal((await storage.readState()).projects[0].description,'다른 탭 변경');assert.ok($('.review-results'));click('[data-dai="close"]');
+});
+
+test('finalization accepts acknowledged unanswered important questions and carries them into the baseline and handoff',async t=>{
+ const {decisionWorkspace,handleDecisionSubmit}=await import('../public/decision-ui.js?v=0.8.0');
+ const {addDecision,handoffDocument}=await import('../public/decision-model.js?v=0.8.0');
+ const {window}=new JSDOM('<main id="planning-root"></main>');
+ const previousFormData=globalThis.FormData;globalThis.FormData=window.FormData;
+ t.after(()=>{globalThis.FormData=previousFormData;window.close();});
+ const project=validateProject({id:'pending-kaf',name:'미답변 기획',description:'질문은 남긴 채 첫 범위를 확정한다.'});
+ const plan=createPlan(project),work=addNode(plan,plan.rootId,{title:'가격 검색',instructions:'가격을 조회한다.',criteria:'날짜별 가격 표시'});
+ for(let i=0;i<21;i++)addDecision(plan,{type:'question',nodeIds:[work.id],question:`검토할 질문 ${i+1}`,reason:'나중에 결정할 범위',blocking:i<17});
+ const originalItems=structuredClone(plan.items),root=window.document.querySelector('#planning-root');
+ const host={project,plan,page:'finalize',root,saving:false,toast(){},render(){root.innerHTML=decisionWorkspace(this);},async persist(next,after){this.plan=next;after?.();this.render();return true;}};
+ host.render();
+ const form=root.querySelector('#decision-finalize'),button=form.querySelector('.primary'),ack=form.querySelector('[name="ack"]');
+ assert.equal(button.disabled,false,'important unanswered questions must not disable finalization');
+ assert.equal(ack.required,true);assert.equal(form.checkValidity(),false);
+ const submit=target=>handleDecisionSubmit(host,{target,preventDefault(){}});
+ await assert.rejects(()=>submit(form),/확인/);assert.equal(host.plan.baselines.length,0);
+ form.querySelector('[name="note"]').value='21개 질문은 미답변으로 남기고 현재 범위를 확정';ack.checked=true;
+ assert.equal(form.checkValidity(),true);await submit(form);
+ assert.equal(host.plan.baselines.length,1);assert.deepEqual(host.plan.items,originalItems);
+ const baseline=host.plan.baselines[0],snapshot=structuredClone(baseline.snapshot);
+ assert.deepEqual(new Set(baseline.snapshot.items.map(i=>i.id)),new Set(originalItems.map(i=>i.id)));
+ for(const item of baseline.snapshot.items){const original=originalItems.find(i=>i.id===item.id);assert.equal(item.question,original.question);assert.equal(item.status,'answer');assert.equal(item.answer,'');assert.equal(item.blocking,original.blocking);assert.equal(item.deferred,false);}
+ assert.equal(baseline.snapshot.items.filter(i=>i.blocking&&i.status==='answer'&&i.answer===''&&!i.deferred).length,17);
+ assert.match(root.querySelector('.handoff-section').textContent,/검토할 질문 1/);
+ assert.match(root.querySelector('.handoff-section').textContent,/미정/);
+ assert.equal(root.querySelector('[data-dec="ai-handoff"]').disabled,false);
+ await submit(root.querySelector('#decision-handoff'));
+ assert.equal(host.plan.handoffs.length,1);assert.deepEqual(host.plan.baselines[0].snapshot,snapshot);
+ const markdown=handoffDocument(host.plan.baselines[0],host.plan.handoffs[0]);
+ assert.match(markdown,/검토할 질문 1/);assert.match(markdown,/검토할 질문 21/);assert.match(markdown,/답변: 미정/);
+ host.page='decisions';host.render();assert.match(root.querySelector('[data-tab="answer"]').textContent,/21/);
 });

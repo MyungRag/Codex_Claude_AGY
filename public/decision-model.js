@@ -1,5 +1,6 @@
-import {changePlan} from './planning-model.js?v=0.7.0';
-import {ensure,text,recordId,array,decisionSnapshot,snapshotKey,nodeFingerprint,questionKey,validateTasks} from './decision-core.js?v=0.7.0';
+import {changePlan} from './planning-model.js?v=0.8.0';
+import {normalizeExecutionMeta,executionOrder} from './execution-order.js?v=0.8.0';
+import {ensure,text,recordId,array,decisionSnapshot,snapshotKey,nodeFingerprint,questionKey,validateTasks} from './decision-core.js?v=0.8.0';
 const now=()=>new Date().toISOString(),uid=()=>crypto.randomUUID();
 export function parseDecisionProposal(raw){
  ensure(raw&&typeof raw==='object','AI 질문 응답을 확인해 주세요.');return {summary:text(raw.summary,6000,'검토 설명'),items:array(raw.items,60,'AI 질문').map(i=>{
@@ -36,22 +37,23 @@ export function updateDecision(plan,id,input,action='save'){
  item.updatedAt=now();return item;
 }
 export function readiness(project,plan){
- const pending=plan.items.filter(i=>i.status!=='done'),blocking=pending.filter(i=>i.blocking&&!i.deferred),conflicts=pending.filter(i=>i.type==='conflict'&&!i.deferred),missing=plan.nodes.filter(n=>n.id!==plan.rootId&&!n.criteria.trim());
+ const pending=plan.items.filter(i=>i.status!=='done'),blocking=pending.filter(i=>i.blocking&&!i.deferred),conflicts=pending.filter(i=>i.type==='conflict'&&!i.deferred),workNodes=plan.nodes.filter(n=>n.id!==plan.rootId&&n.nodeType!=='group'),missing=workNodes.filter(n=>!n.criteria.trim());
  const unreviewed=plan.nodes.filter(n=>!plan.questionCoverage.some(c=>c.nodeId===n.id&&c.fingerprint===nodeFingerprint(plan,n.id)));
- const latest=plan.baselines.at(-1);return {blocking,conflicts,missing,unreviewed,pending,ready:plan.nodes.length>1&&!blocking.length&&!conflicts.length&&!missing.length,latest,current:!!latest&&snapshotKey(latest.snapshot)===snapshotKey(decisionSnapshot(project,plan))};
+ // A baseline records the current plan, including questions that still need an answer.
+ const latest=plan.baselines.at(-1);return {blocking,conflicts,missing,unreviewed,pending,ready:workNodes.length>0&&!conflicts.length&&!missing.length,latest,current:!!latest&&snapshotKey(latest.snapshot)===snapshotKey(decisionSnapshot(project,plan))};
 }
 export function finalizePlan(project,plan,note=''){
- const check=readiness(project,plan);ensure(check.ready,'중요 미결정 사항·충돌·완료 기준을 먼저 확인해 주세요.');ensure(!check.current,'현재 기획은 이미 확정되어 있습니다.');
+ const check=readiness(project,plan);ensure(check.ready,'작업 노드·미해결 충돌·완료 기준을 먼저 확인해 주세요.');ensure(!check.current,'현재 기획은 이미 확정되어 있습니다.');
  return changePlan(plan,'기획 확정',p=>{p.baselines.push({id:uid(),number:(p.baselines.at(-1)?.number||0)+1,at:now(),note:text(note,3000,'확정 메모'),snapshot:decisionSnapshot(project,p)});p.baselines=p.baselines.slice(-10);p.handoffs=p.handoffs.filter(h=>p.baselines.some(b=>b.id===h.baselineId));});
 }
-export function createAssignments(baseline){return baseline.snapshot.nodes.filter(n=>n.id!==baseline.snapshot.rootId).map((n,index)=>({nodeId:n.id,agent:['codex','claude','agy'][index%3],dependsOn:[],instructions:n.instructions||n.description||n.title+' 작업을 완료 기준에 맞게 구현하고 검증하세요.',criteria:n.criteria,deliverable:n.title+' 구현 결과와 검증 결과'}));}
+export function createAssignments(baseline){return executionOrder(baseline.snapshot.nodes.filter(n=>n.id!==baseline.snapshot.rootId&&n.nodeType!=='group')).map((n,index)=>({nodeId:n.id,agent:['codex','claude','agy'][index%3],...normalizeExecutionMeta(n),instructions:n.instructions||n.description||n.title+' 작업을 완료 기준에 맞게 구현하고 검증하세요.',criteria:n.criteria,deliverable:n.title+' 구현 결과와 검증 결과'}));}
 export function parseHandoff(raw){ensure(raw&&typeof raw==='object','업무 분담 응답을 확인해 주세요.');return {summary:text(raw.summary,6000,'분담 설명'),tasks:array(raw.tasks,99,'분담 작업').map(t=>({nodeId:recordId(t.nodeId),agent:text(t.agent,20,'담당'),dependsOn:array(t.dependsOn??[],99,'선행 작업').map(recordId),instructions:text(t.instructions??'',6000,'지시'),deliverable:text(t.deliverable??'',3000,'결과'),criteria:text(t.criteria??'',3000,'기준')}))};}
 export function saveAssignments(plan,baselineId,tasks,source='직접 편집'){
  const baseline=plan.baselines.find(b=>b.id===baselineId);ensure(baseline,'확정 기획이 없습니다.');const checked=validateTasks(tasks,baseline.snapshot);
  return changePlan(plan,'업무 분담안 저장',p=>{p.handoffs=p.handoffs.filter(h=>h.baselineId!==baselineId);p.handoffs.push({baselineId,tasks:checked,updatedAt:now(),source});});
 }
 export function handoffDocument(baseline,handoff){
- const snapshot=baseline.snapshot;return `# ${snapshot.project.name} · 확정 기획 v${baseline.number}\n\n목표: ${snapshot.project.description}\n공통 지침: ${snapshot.project.instructions}\n공통 질문·결정·제약:\n${snapshot.items.filter(i=>i.nodeIds.includes(snapshot.rootId)).map(i=>`- [${i.status}${i.deferred?' / 보류':''}] ${i.question} → ${i.answer||'미정'} (근거: ${i.evidence||'미확인'}${i.deferred?'; 보류 이유: '+i.deferReason:''})`).join('\n')||'- 없음'}\n확정 메모: ${baseline.note}\n\n${handoff.tasks.map(t=>{const node=snapshot.nodes.find(n=>n.id===t.nodeId);const items=snapshot.items.filter(i=>i.nodeIds.includes(node.id));return `## ${node.title}\n담당: ${t.agent}\n선행 작업: ${t.dependsOn.map(id=>snapshot.nodes.find(n=>n.id===id)?.title).join(', ')||'없음'}\n업무 지시: ${t.instructions}\n기대 결과: ${t.deliverable}\n완료 기준: ${t.criteria}\n질문·결정·제약:\n${items.map(i=>`- [${i.status}${i.deferred?' / 보류':''}] ${i.question}\n  답변: ${i.answer||'미정'}\n  근거: ${i.evidence||'미확인'}${i.deferred?'\n  보류 이유: '+i.deferReason:''}`).join('\n')||'- 없음'}`;}).join('\n\n')}`;
+ const snapshot=baseline.snapshot;return `# ${snapshot.project.name} · 확정 기획 v${baseline.number}\n\n목표: ${snapshot.project.description}\n공통 지침: ${snapshot.project.instructions}\n미답변·미확정 항목: ${snapshot.items.filter(i=>i.status!=='done').length}개. 미답변은 임의로 결정하지 말고 관련 작업에서 확인하세요.\n공통 질문·결정·제약:\n${snapshot.items.filter(i=>i.nodeIds.includes(snapshot.rootId)).map(i=>`- [${i.status}${i.deferred?' / 보류':''}] ${i.question} → ${i.answer||'미정'} (근거: ${i.evidence||'미확인'}${i.deferred?'; 보류 이유: '+i.deferReason:''})`).join('\n')||'- 없음'}\n확정 메모: ${baseline.note}\n\n${validateTasks(handoff.tasks,snapshot).map(t=>{const node=snapshot.nodes.find(n=>n.id===t.nodeId);const items=snapshot.items.filter(i=>i.nodeIds.includes(node.id));return `## ${node.title}\n담당: ${t.agent}\n구현 우선순위: ${t.order??'미지정'} (선행 작업 완료 후 적용)\n선행 관계: ${t.dependencyState==='defined'?'확인됨':'미검토'}${t.dependencyIssues.length?' · 해결 필요: '+t.dependencyIssues.join('; '):''}\n선행 작업: ${t.dependsOn.map(id=>snapshot.nodes.find(n=>n.id===id)?.title).join(', ')||(t.dependencyState==='defined'?'없음':'아직 검토하지 않음')}\n[함수 구현 순서]\n${t.functionSteps.map((step,index)=>`${index+1}. ${step}`).join('\n')||'미작성 — 작업 특성에 맞춰 설계하고 검증하세요.'}\n업무 지시: ${t.instructions}\n기대 결과: ${t.deliverable}\n완료 기준: ${t.criteria}\n질문·결정·제약:\n${items.map(i=>`- [${i.status}${i.deferred?' / 보류':''}] ${i.question}\n  답변: ${i.answer||'미정'}\n  근거: ${i.evidence||'미확인'}${i.deferred?'\n  보류 이유: '+i.deferReason:''}`).join('\n')||'- 없음'}`;}).join('\n\n')}`;
 }
 export function decisionPrompt(project,plan,kind,nodeIds=plan.nodes.map(n=>n.id)){
  const snapshot=decisionSnapshot(project,plan);

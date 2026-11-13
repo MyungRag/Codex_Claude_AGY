@@ -38,6 +38,6 @@ test('model catalog preserves CLI IDs and supported efforts; saved selections su
  const map=new Map(),storage={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v)},calls=[];
  const a=new RunnerClient({storage,preferences:storage,fetcher:async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'job'})};}});a.catalogs.codex={models:catalog};a.saveSettings('codex',{model:'gpt-6-astra',effort:'xhigh'});
  const b=new RunnerClient({storage,preferences:storage});assert.deepEqual(b.getSettings('codex'),{model:'gpt-6-astra',effort:'xhigh'});
- await assert.rejects(a.start('codex','prompt'),/v0.7.0/);assert.equal(calls.length,0);
- a.runnerInfo={features:{modelSelection:true,modelCapabilities:true}};await a.start('codex','prompt');assert.deepEqual(calls[0].settings,{model:'gpt-6-astra',effort:'xhigh'});
+ await assert.rejects(a.start('codex','prompt'),/v0.8.0/);assert.equal(calls.length,0);
+ a.runnerInfo={features:{modelSelection:true,modelCapabilities:true,unlimitedWait:true}};await a.start('codex','prompt');assert.deepEqual(calls[0].settings,{model:'gpt-6-astra',effort:'xhigh'});
 });

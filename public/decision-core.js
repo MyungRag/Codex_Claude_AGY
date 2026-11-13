@@ -1,3 +1,4 @@
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.8.0';
 // Shared, bounded records for questions, immutable baselines and handoff drafts.
 export const decisionTypes={question:'사용자 결정',verification:'추가 확인',constraint:'제약 사항',conflict:'결정 충돌'};
 export const decisionStatuses={answer:'답변 필요',check:'확인 필요',done:'결정 완료'};
@@ -18,28 +19,33 @@ export function validateItems(raw,nodes){
   return {id:recordId(i.id),nodeIds:nodeLinks,type:i.type,status:i.status,question,reason:text(i.reason??'',3000,'질문 이유'),options:options(i.options),answer,evidence:text(i.evidence??'',4000,'확인 근거'),blocking:i.blocking===true,deferred:i.deferred===true,deferReason,relatedIds:ids(i.relatedIds??[],20),changedReason:text(i.changedReason??'',2000,'재확인 이유'),createdAt:stamp(i.createdAt),updatedAt:stamp(i.updatedAt),sources:array(i.sources??[],30,'AI 의견').map(s=>{ensure(agents.includes(s.agent),'제안한 AI를 확인해 주세요.');return {agent:s.agent,reason:text(s.reason??'',3000,'AI 의견'),evidence:text(s.evidence??'',4000,'AI 확인 근거'),options:options(s.options)};}),history:array(i.history??[],20,'답변 이력').map(h=>({at:stamp(h.at),action:text(h.action,100,'이력'),answer:text(h.answer??'',6000,'이전 답변'),evidence:text(h.evidence??'',4000,'이전 근거')}))};
  });const all=new Set(items.map(i=>i.id));ensure(all.size===items.length,'중복 질문 ID입니다.');for(const i of items){ensure(i.relatedIds.every(id=>all.has(id)&&id!==i.id),'연결된 결정 항목이 없습니다.');ensure(i.relatedIds.every(id=>items.find(x=>x.id===id).type!=='conflict'),'충돌 항목끼리 연결할 수 없습니다.');if(i.type==='conflict')ensure(i.relatedIds.length>=2,'충돌에는 두 개 이상의 결정 항목이 필요합니다.');}return items;
 }
-export const semanticNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria});
+// Omit all-default metadata in canonical snapshots so older saved baselines and
+// question fingerprints remain current after the additive migration.
+const semanticExecutionMeta=n=>{const meta=normalizeExecutionMeta(n);return meta.nodeType==='task'&&meta.order===null&&!meta.dependsOn.length&&!meta.functionSteps.length&&meta.dependencyState==='unreviewed'&&!meta.dependencyIssues.length?{}:meta;};
+export const semanticNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria,...semanticExecutionMeta(n)});
 export const nodeFingerprint=(plan,id)=>JSON.stringify({node:semanticNode(plan.nodes.find(n=>n.id===id)),parents:plan.edges.filter(e=>e.to===id).map(e=>e.from).sort()});
 export function decisionSnapshot(project,plan){return {project:{name:project.name,description:project.description||'',instructions:project.instructions||''},rootId:plan.rootId,nodes:plan.nodes.map(semanticNode).sort((a,b)=>a.id.localeCompare(b.id)),edges:[...plan.edges].sort((a,b)=>(a.from+':'+a.to).localeCompare(b.from+':'+b.to)),items:(plan.items||[]).map(i=>({id:i.id,nodeIds:[...i.nodeIds].sort(),type:i.type,status:i.status,question:i.question,answer:i.answer,evidence:i.evidence,blocking:i.blocking,deferred:i.deferred,deferReason:i.deferReason,relatedIds:[...i.relatedIds].sort()})).sort((a,b)=>a.id.localeCompare(b.id))};}
 export const snapshotKey=snapshot=>JSON.stringify(snapshot);
 function validateSnapshot(s){
- ensure(s&&s.project,'확정 기획을 확인해 주세요.');const nodes=array(s.nodes,100,'확정 노드').map(n=>({id:recordId(n.id),title:text(n.title,100,'이름'),description:text(n.description,3000,'설명'),instructions:text(n.instructions,6000,'지시'),criteria:text(n.criteria,3000,'완료 기준')}));
+ ensure(s&&s.project,'확정 기획을 확인해 주세요.');const nodes=array(s.nodes,100,'확정 노드').map(n=>({id:recordId(n.id),title:text(n.title,100,'이름'),description:text(n.description,3000,'설명'),instructions:text(n.instructions,6000,'지시'),criteria:text(n.criteria,3000,'완료 기준'),...semanticExecutionMeta(n)}));
  const nodeIds=new Set(nodes.map(n=>n.id));ensure(nodeIds.size===nodes.length&&nodeIds.has(s.rootId),'확정 기획의 목표를 확인해 주세요.');const edges=array(s.edges,400,'확정 연결').map(e=>({from:recordId(e.from),to:recordId(e.to)}));ensure(edges.every(e=>nodeIds.has(e.from)&&nodeIds.has(e.to)),'확정 기획 연결을 확인해 주세요.');
  ensure(new Set(edges.map(e=>e.from+':'+e.to)).size===edges.length&&!edges.some(e=>e.to===s.rootId),'확정 기획의 중복 연결·목표 연결을 확인해 주세요.');
  const visiting=new Set(),done=new Set();const visit=id=>{ensure(!visiting.has(id),'확정 기획에 순환 연결이 있습니다.');if(done.has(id))return;visiting.add(id);for(const edge of edges.filter(e=>e.from===id))visit(edge.to);visiting.delete(id);done.add(id);};visit(s.rootId);ensure(done.size===nodes.length,'확정 기획에 연결되지 않은 노드가 있습니다.');
+ validateExecutionGraph(nodes,{rootId:s.rootId});
  const at='2000-01-01T00:00:00.000Z';const items=validateItems((s.items||[]).map(i=>({...i,createdAt:at,updatedAt:at})),nodes).map(({id,nodeIds,type,status,question,answer,evidence,blocking,deferred,deferReason,relatedIds})=>({id,nodeIds,type,status,question,answer,evidence,blocking,deferred,deferReason,relatedIds}));
  return {project:{name:text(s.project.name,80,'프로젝트'),description:text(s.project.description,1000,'목표'),instructions:text(s.project.instructions,12000,'공통 지침')},rootId:s.rootId,nodes,edges,items};
 }
 export function validateTasks(raw,snapshot){
- const nodes=snapshot.nodes.filter(n=>n.id!==snapshot.rootId),valid=new Set(nodes.map(n=>n.id));
- const tasks=array(raw,nodes.length,'업무 분담').map(t=>{ensure(valid.has(t.nodeId)&&agents.includes(t.agent),'업무 담당과 노드를 확인해 주세요.');const dependsOn=ids(t.dependsOn??[]);ensure(dependsOn.every(id=>valid.has(id)&&id!==t.nodeId),'선행 작업을 확인해 주세요.');return {nodeId:t.nodeId,agent:t.agent,dependsOn,instructions:text(t.instructions??'',6000,'업무 지시'),deliverable:text(t.deliverable??'',3000,'기대 결과'),criteria:text(t.criteria??'',3000,'완료 기준')};});
+ const nodes=snapshot.nodes.filter(n=>n.id!==snapshot.rootId&&n.nodeType!=='group'),valid=new Set(nodes.map(n=>n.id));
+ const tasks=array(raw,nodes.length,'업무 분담').map(t=>{ensure(valid.has(t.nodeId)&&agents.includes(t.agent),'업무 담당과 노드를 확인해 주세요.');const node=nodes.find(n=>n.id===t.nodeId),meta=normalizeExecutionMeta({...node,...t,nodeType:'task'}),dependsOn=ids(meta.dependsOn);ensure(dependsOn.every(id=>valid.has(id)&&id!==t.nodeId),'선행 작업을 확인해 주세요.');return {nodeId:t.nodeId,agent:t.agent,...meta,dependsOn,instructions:text(t.instructions??'',6000,'업무 지시'),deliverable:text(t.deliverable??'',3000,'기대 결과'),criteria:text(t.criteria??'',3000,'완료 기준')};});
  ensure(tasks.every(t=>t.instructions&&t.deliverable&&t.criteria),'업무 지시·기대 결과·완료 기준을 모두 입력해 주세요.');
  ensure(tasks.length===nodes.length&&new Set(tasks.map(t=>t.nodeId)).size===nodes.length,'모든 작업 노드에 담당자가 한 번씩 지정되어야 합니다.');
- const visiting=new Set(),done=new Set();const visit=id=>{ensure(!visiting.has(id),'선행 작업이 순환합니다.');if(done.has(id))return;visiting.add(id);for(const other of tasks.find(t=>t.nodeId===id).dependsOn)visit(other);visiting.delete(id);done.add(id);};for(const t of tasks)visit(t.nodeId);return tasks;
+ const visiting=new Set(),done=new Set();const visit=id=>{ensure(!visiting.has(id),'선행 작업이 순환합니다.');if(done.has(id))return;visiting.add(id);for(const other of tasks.find(t=>t.nodeId===id).dependsOn)visit(other);visiting.delete(id);done.add(id);};for(const t of tasks)visit(t.nodeId);
+ return executionOrder(tasks.map(t=>({...t,id:t.nodeId}))).map(({id,...task})=>task);
 }
 export function validateDecisionState(raw,nodes){
  const items=validateItems(raw.items,nodes),nodeIds=new Set(nodes.map(n=>n.id));
- const coverage=array(raw.questionCoverage??[],100,'검토 기록').map(c=>{ensure(nodeIds.has(c.nodeId),'검토 대상 노드가 없습니다.');return {nodeId:c.nodeId,fingerprint:text(c.fingerprint,20000,'검토 내용'),at:stamp(c.at)};});
+ const coverage=array(raw.questionCoverage??[],100,'검토 기록').map(c=>{ensure(nodeIds.has(c.nodeId),'검토 대상 노드가 없습니다.');return {nodeId:c.nodeId,fingerprint:text(c.fingerprint,500000,'검토 내용'),at:stamp(c.at)};});
  const baselines=array(raw.baselines??[],10,'확정 기획 버전').map(b=>({id:recordId(b.id),number:b.number,at:stamp(b.at),note:text(b.note??'',3000,'확정 메모'),snapshot:validateSnapshot(b.snapshot)}));
  ensure(baselines.every(b=>Number.isSafeInteger(b.number)&&b.number>0)&&new Set(baselines.map(b=>b.id)).size===baselines.length&&new Set(baselines.map(b=>b.number)).size===baselines.length,'확정 버전을 확인해 주세요.');
  const handoffs=array(raw.handoffs??[],10,'업무 분담 기록').map(h=>{const base=baselines.find(b=>b.id===h.baselineId);ensure(base,'업무 분담의 확정 기획이 없습니다.');return {baselineId:base.id,tasks:validateTasks(h.tasks,base.snapshot),updatedAt:stamp(h.updatedAt),source:text(h.source??'직접 편집',100,'분담 출처')};});ensure(new Set(handoffs.map(h=>h.baselineId)).size===handoffs.length,'확정 버전당 업무 분담은 하나입니다.');

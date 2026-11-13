@@ -1,0 +1,45 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
+import {createPlan,addNode,validatePlan,removeNode} from '../public/planning-model.js';
+
+test('planning execution view distinguishes hierarchy, precedence, editable steps and deleted prerequisites',async t=>{
+ const {window}=new JSDOM('<main id="planning-root"></main>',{url:'http://127.0.0.1:4173'});
+ for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
+ const {mountPlanner}=await import('../public/planning.js?v=0.8.0');
+ const project={id:'order-ui',name:'구현 순서 확인',description:'계층과 구현 순서',instructions:''};
+ const plan=createPlan(project),group=addNode(plan,plan.rootId,{title:'계산 기능',nodeType:'group'});
+ const consumer=addNode(plan,group.id,{title:'철근량·연성 규정 검토',order:1,criteria:'규정 만족',dependencyState:'defined'});
+ const producer=addNode(plan,plan.rootId,{title:'설계기준·재료 계수',order:9,criteria:'계수 검증',dependencyState:'defined'});
+ consumer.dependsOn=[producer.id];consumer.functionSteps=['계수 입력 계약 검증','규정 판정 계산'];
+ project.planning=validatePlan(plan);
+ const root=document.querySelector('#planning-root'),messages=[];let saved;
+ const planner=mountPlanner(root,{project,revision:0,icon:()=>'',toast:m=>messages.push(m),exportProject(){},save:async value=>{saved=structuredClone(value);return 1;}});
+ t.after(()=>{planner.destroy();window.close();});
+ const find=s=>{const el=root.querySelector(s);assert.ok(el,s);return el;};
+ const click=s=>planner.onClick({target:find(s),preventDefault(){}});
+ const submit=()=>planner.onSubmit({target:find('#node-editor'),preventDefault(){}});
+ await click('[data-pa="mode-execution"]');
+ assert.deepEqual([...root.querySelectorAll('[data-execution-node]')].map(el=>el.dataset.executionNode),[producer.id,consumer.id]);
+ assert.match(find(`[data-execution-node="${consumer.id}"]`).textContent,/설계기준·재료 계수/);
+ assert.equal(root.querySelector(`[data-execution-node="${group.id}"]`),null);
+ await click(`[data-pa="edit"][data-id="${consumer.id}"]`);
+ assert.equal(find('[name="order"]').value,'1');assert.equal(find('[name="dependsOn"] option:checked').value,producer.id);
+ assert.match(find('[name="functionSteps"]').value,/계수 입력 계약 검증/);
+ find('[name="order"]').value='2';find('[name="functionSteps"]').value='입력 계약 검사\n독립 계산 검증\n결과 표시';
+ await submit();assert.equal(saved.nodes.find(n=>n.id===consumer.id).order,2);
+ assert.deepEqual(saved.nodes.find(n=>n.id===consumer.id).functionSteps,['입력 계약 검사','독립 계산 검증','결과 표시']);
+ // A cycle must fail without saving or throwing the editor contents away.
+ await click(`[data-pa="edit"][data-id="${producer.id}"]`);
+ find(`[name="dependsOn"] option[value="${consumer.id}"]`).selected=true;
+ const before=structuredClone(saved);await submit();assert.deepEqual(saved,before);assert.match(find('.planner-alert').textContent,/순환/);assert.ok(root.querySelector('#node-editor'));
+ await click('[data-pa="cancel-edit"]');
+ await planner.mutate('선행 삭제',p=>removeNode(p,producer.id));
+ assert.match(find(`[data-execution-node="${consumer.id}"]`).textContent,/삭제|재확인/);
+ await click(`[data-pa="edit"][data-id="${consumer.id}"]`);
+ find('[name="title"]').value='규정 검토 변경';await submit();assert.ok(saved.nodes.find(n=>n.id===consumer.id).dependencyIssues.length,'title-only editing must retain unresolved dependency');
+ await click(`[data-pa="edit"][data-id="${consumer.id}"]`);
+ find('[name="resolveDependencies"]').checked=true;find('[name="dependencyState"]').value='defined';await submit();
+ assert.deepEqual(saved.nodes.find(n=>n.id===consumer.id).dependencyIssues,[]);
+ assert.equal(saved.nodes.find(n=>n.id===consumer.id).dependencyState,'defined');
+});

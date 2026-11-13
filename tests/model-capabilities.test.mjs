@@ -67,8 +67,8 @@ test('capability read failure does not prevent default requests, no automatic pa
 
 test('client blocks stale saved Max, clears catalog on PC changes, and discovers capabilities after a successful default probe',async()=>{
  const saved={getItem:()=>JSON.stringify({agy:{model:'',effort:'max'}}),setItem:()=>{}},paths=[],catalog={models:[{id:'model',efforts:['high'],isDefault:true}]};
- const client=new RunnerClient({preferences:saved,storage:null,fetcher:async(url)=>{paths.push(url);return {ok:true,json:async()=>url.includes('/models/')?catalog:url.includes('/jobs/')?{id:'job',agent:'agy',kind:'probe',status:'succeeded'}:{agents:[],features:{modelCapabilities:true},catalogs:{agy:catalog}}};}});
- client.runnerInfo={features:{modelCapabilities:true}};client.catalogs.agy=catalog;
+ const client=new RunnerClient({preferences:saved,storage:null,fetcher:async(url)=>{paths.push(url);return {ok:true,json:async()=>url.includes('/models/')?catalog:url.includes('/jobs/')?{id:'job',agent:'agy',kind:'probe',status:'succeeded'}:{agents:[],features:{modelCapabilities:true,unlimitedWait:true},catalogs:{agy:catalog}}};}});
+ client.runnerInfo={features:{modelCapabilities:true,unlimitedWait:true}};client.catalogs.agy=catalog;
  await assert.rejects(client.start('agy','prompt'),/Max/);assert.equal(paths.length,0);
  client.saveSettings('agy',{model:'',effort:''});await client.poll('job');assert.ok(paths.some(p=>p.endsWith('/models/agy')));
  client.disconnect();assert.deepEqual(client.catalogs,{});assert.equal(client.usage,null);

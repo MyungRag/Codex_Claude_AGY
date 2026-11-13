@@ -3,14 +3,16 @@ import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {pickWindowsFolder} from './folder-picker.mjs';
+import {createWindowsPackage} from './windows-package.mjs';
 
 const root=new URL('../public/',import.meta.url);
 const assets=new Map([['/','index.html'],['/index.html','index.html'],['/download','download.html'],['/download.html','download.html'],['/app.js','app.js'],['/model.js','model.js'],['/storage.js','storage.js'],['/style.css','style.css'],['/favicon.svg','favicon.svg'],['/planning.js','planning.js'],['/planning-model.js','planning-model.js'],['/planning.css','planning.css'],['/agent-client.js','agent-client.js'],['/agent-ui.js','agent-ui.js'],['/agents.css','agents.css'],['/agent-settings.js','agent-settings.js'],['/organize-model.js','organize-model.js'],['/organize-ui.js','organize-ui.js'],['/model-controls.js','model-controls.js']]);
+for(const name of ['execution-order.js','decision-ui.js','decision-core.js','decision-model.js','decision-ai-ui.js','development-core.js','development.js','development-client.js','development.css'])assets.set('/'+name,name);
 const mime={html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',svg:'image/svg+xml'};
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
-export function createAppServer({platform=process.platform,pickFolder=pickWindowsFolder,agentRunner}={}) {
+export function createAppServer({platform=process.platform,pickFolder=pickWindowsFolder,agentRunner,developmentRunner,developmentDataRoot}={}) {
   let choosing=false;
-  const agentAPI=createAgentAPI({runner:agentRunner});
+  const agentAPI=createAgentAPI({runner:agentRunner,developmentRunner,developmentDataRoot});
   const server=createServer(async(req,res)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;
     if(pathname.startsWith('/api/')) {
@@ -35,6 +37,15 @@ export function createAppServer({platform=process.platform,pickFolder=pickWindow
       finally{choosing=false;}
       return;
     }
+    if(pathname==='/downloads/agent-desk-windows.zip'){
+      if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{'Allow':'GET, HEAD'});res.end();return;}
+      try{
+        const body=await createWindowsPackage();
+        res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="agent-desk-windows.zip"','Content-Length':body.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+        res.end(req.method==='HEAD'?undefined:body);
+      }catch{res.writeHead(500,{'Cache-Control':'no-store'});res.end('Unable to package app');}
+      return;
+    }
     const asset=assets.get(pathname);
     if(!asset||!['GET','HEAD'].includes(req.method)){res.writeHead(404);res.end('Not found');return;}
     try {
@@ -43,7 +54,7 @@ export function createAppServer({platform=process.platform,pickFolder=pickWindow
       res.end(req.method==='HEAD'?undefined:body);
     }catch{res.writeHead(500);res.end('Unable to load app');}
   });
-  server.on('close',()=>{void agentAPI.runner.close();});
-  server.stopAgents=()=>agentAPI.runner.close();
+  server.on('close',()=>{void agentAPI.close();});
+  server.stopAgents=()=>agentAPI.close();
   return server;
 }

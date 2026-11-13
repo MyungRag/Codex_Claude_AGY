@@ -1,7 +1,8 @@
-import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.7.0';
+import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.8.0';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.8.0';
 // Serializable graph operations. No agent calls or filesystem access occur here.
 export const AGENTS = [{id:'codex',name:'Codex',short:'C'},{id:'claude',name:'Claude',short:'✳'},{id:'agy',name:'AGY',short:'A'}];
-export const NODE_WIDTH=236, NODE_HEIGHT=174;
+export const NODE_WIDTH=236, NODE_HEIGHT=204;
 const uid=()=>crypto.randomUUID();
 const clone=value=>structuredClone(value);
 const norm=value=>value.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase();
@@ -21,10 +22,11 @@ function validateCore(raw){
     const f=fields(n);check(f.title,'노드 이름을 입력해 주세요.');
     check(Number.isFinite(n.x)&&Number.isFinite(n.y)&&n.x>=0&&n.y>=0&&n.x<=50000&&n.y<=50000,'노드 위치가 올바르지 않습니다.');
     check(['draft','review','confirmed'].includes(n.status),'노드 상태가 올바르지 않습니다.');
-    return {id:id(n.id),...f,x:n.x,y:n.y,status:n.status,origin:['user','template','proposal'].includes(n.origin)?n.origin:'user'};
+    return {id:id(n.id),...f,...normalizeExecutionMeta(n),x:n.x,y:n.y,status:n.status,origin:['user','template','proposal'].includes(n.origin)?n.origin:'user'};
   });
   const ids=new Set(nodes.map(n=>n.id));check(ids.size===nodes.length&&nodes.length>0,'중복되거나 비어 있는 노드입니다.');
   const rootId=id(raw.rootId);check(ids.has(rootId),'기획 목표 노드가 없습니다.');
+  validateExecutionGraph(nodes,{rootId});
   const edges=list(raw.edges,400,'연결선').map(e=>({from:id(e.from),to:id(e.to)}));
   check(uniqueEdges(edges).length===edges.length,'중복 연결 또는 자기 자신으로의 연결은 만들 수 없습니다.');
   for(const e of edges)check(ids.has(e.from)&&ids.has(e.to)&&e.to!==rootId,'연결할 노드를 확인해 주세요.');
@@ -69,7 +71,7 @@ export function travelHistory(plan,direction){
   next.history=[{id:uid(),label:`${from==='undo'?'되돌리기':'다시 실행'} · ${entry.label}`,at:new Date().toISOString()},...plan.history].slice(0,60);
   return validatePlan(next);
 }
-export function newNode(input={}){return {id:uid(),...fields({title:'새 노드',...input}),x:40,y:40,status:'draft',origin:'user'};}
+export function newNode(input={}){return {id:uid(),...fields({title:'새 노드',...input}),...normalizeExecutionMeta(input),x:40,y:40,status:'draft',origin:'user'};}
 export function createPlan(project,template=false){
   const root=newNode({title:project.name,description:project.description||'이 프로젝트에서 이루고 싶은 목표를 구체화해 보세요.',instructions:''});
   const plan={version:1,changeNumber:0,rootId:root.id,nodes:[root],edges:[],proposals:[],messages:[],history:[],undo:[],redo:[],demo:false};
@@ -87,14 +89,19 @@ export function addNode(plan,parentId,input,betweenId=null){
 }
 export function editNode(plan,nodeId,input){
   const node=plan.nodes.find(n=>n.id===nodeId);check(node,'노드가 없습니다.');
-  Object.assign(node,fields(input),{status:input.status||'draft'});
+  Object.assign(node,fields(input),normalizeExecutionMeta({...node,...input}),{status:input.status||'draft'});
 }
 export function removeNode(plan,nodeId,cascade=false){
   check(nodeId!==plan.rootId,'전체 목표는 삭제할 수 없습니다. 이름과 내용을 수정해 주세요.');
   check(plan.nodes.some(n=>n.id===nodeId),'노드가 없습니다.');
   const removed=new Set([nodeId,...(cascade?descendants(plan,nodeId):[])]);
+  const removedTitles=new Map(plan.nodes.filter(n=>removed.has(n.id)).map(n=>[n.id,n.title]));
   const parents=plan.edges.filter(e=>e.to===nodeId).map(e=>e.from), children=childrenOf(plan,nodeId);
   plan.nodes=plan.nodes.filter(n=>!removed.has(n.id));
+  for(const node of plan.nodes){
+    const missing=(node.dependsOn??[]).filter(id=>removed.has(id));
+    if(missing.length){node.dependsOn=node.dependsOn.filter(id=>!removed.has(id));node.dependencyState='unreviewed';node.dependencyIssues=[...new Set([...(node.dependencyIssues??[]),...missing.map(id=>`삭제된 선행 작업: ${removedTitles.get(id)} [${id}]. 대체 작업과 의존성을 다시 확인해 주세요.`)])];}
+  }
   plan.edges=plan.edges.filter(e=>!removed.has(e.from)&&!removed.has(e.to));
   if(!cascade)for(const from of parents)for(const to of children)plan.edges.push({from,to});
   plan.edges=uniqueEdges(plan.edges);
@@ -107,14 +114,22 @@ export function moveUnder(plan,nodeId,parentId){
   plan.edges=plan.edges.filter(e=>e.to!==nodeId);plan.edges.push({from:parentId,to:nodeId});
 }
 const joinContent=(nodes,key)=>[...new Set(nodes.map(n=>n[key]).filter(Boolean))].join('\n\n');
-export function mergeFields(plan,ids){const nodes=plan.nodes.filter(n=>ids.includes(n.id));return {title:nodes[0]?.title||'',description:joinContent(nodes,'description'),instructions:joinContent(nodes,'instructions'),criteria:joinContent(nodes,'criteria')};}
+export function mergeFields(plan,ids){
+  const nodes=plan.nodes.filter(n=>ids.includes(n.id)),meta=nodes.map(normalizeExecutionMeta),orders=meta.map(n=>n.order).filter(n=>n!==null);
+  return {title:nodes[0]?.title||'',description:joinContent(nodes,'description'),instructions:joinContent(nodes,'instructions'),criteria:joinContent(nodes,'criteria'),
+    nodeType:meta.length&&meta.every(n=>n.nodeType==='group')?'group':'task',order:orders.length?Math.min(...orders):null,
+    dependsOn:[...new Set(meta.flatMap(n=>n.dependsOn))].filter(id=>!ids.includes(id)),functionSteps:[...new Set(meta.flatMap(n=>n.functionSteps))],
+    dependencyState:meta.every(n=>n.dependencyState==='defined')?'defined':'unreviewed',dependencyIssues:[...new Set(meta.flatMap(n=>n.dependencyIssues))]};
+}
 export function mergeNodes(plan,ids,input){
   ids=[...new Set(ids)];check(ids.length>=2&&!ids.includes(plan.rootId),'목표 노드를 제외한 두 개 이상의 노드를 선택해 주세요.');
   check(ids.every(i=>plan.nodes.some(n=>n.id===i)),'선택한 노드가 없습니다.');
   for(const i of ids)check(!ids.some(j=>descendants(plan,i).has(j)),'상위·하위 노드는 서로 합칠 수 없습니다. 같은 단계의 노드를 선택해 주세요.');
   const kept=ids[0], removed=new Set(ids.slice(1));
-  editNode(plan,kept,{...input,status:'draft'});
+  const merged=mergeFields(plan,ids);
+  editNode(plan,kept,{...merged,...input,dependsOn:[...new Set([...merged.dependsOn,...(input.dependsOn??[])])].filter(id=>!ids.includes(id)),status:'draft'});
   plan.nodes=plan.nodes.filter(n=>!removed.has(n.id));
+  for(const node of plan.nodes)node.dependsOn=[...new Set((node.dependsOn??[]).map(id=>removed.has(id)?kept:id))].filter(id=>id!==node.id);
   plan.edges=uniqueEdges(plan.edges.map(e=>({from:removed.has(e.from)?kept:e.from,to:removed.has(e.to)?kept:e.to})));
   plan.proposals=plan.proposals.map(p=>removed.has(p.nodeId)?{...p,nodeId:kept}:p);
   const title=plan.nodes.find(n=>n.id===kept).title;
@@ -123,11 +138,14 @@ export function mergeNodes(plan,ids,input){
   return kept;
 }
 export function layoutPlan(plan){
-  // A stable layered DAG layout. Moving a card never changes its relationships.
+  // Hierarchy determines Y; the full dependency graph ranks peers on X.
+  // Dragging cards changes neither containment nor execution dependencies.
+  validateExecutionGraph(plan.nodes,{rootId:plan.rootId});
+  const rank=new Map(executionOrder(plan.nodes).map((n,index)=>[n.id,index]));
   const depths=new Map([[plan.rootId,0]]);const visit=node=>{for(const child of childrenOf(plan,node)){const depth=depths.get(node)+1;if((depths.get(child)??-1)<depth){depths.set(child,depth);visit(child);}}};visit(plan.rootId);
   const layers=new Map();for(const n of plan.nodes){const d=depths.get(n.id)||0;if(!layers.has(d))layers.set(d,[]);layers.get(d).push(n);}
   const columns=Math.max(...[...layers.values()].map(a=>a.length)), width=columns*(NODE_WIDTH+48);
-  for(const [depth,nodes] of layers)nodes.forEach((node,index)=>{node.x=48+(width-nodes.length*(NODE_WIDTH+48))/2+index*(NODE_WIDTH+48);node.y=48+depth*(NODE_HEIGHT+116);});
+  for(const [depth,nodes] of layers)nodes.sort((a,b)=>rank.get(a.id)-rank.get(b.id)).forEach((node,index)=>{node.x=48+(width-nodes.length*(NODE_WIDTH+48))/2+index*(NODE_WIDTH+48);node.y=48+depth*(NODE_HEIGHT+116);});
 }
 export function visibleNodes(plan,collapsed){
   const seen=new Set();const visit=node=>{if(seen.has(node))return;seen.add(node);if(!collapsed.has(node))for(const child of childrenOf(plan,node))visit(child);};visit(plan.rootId);return plan.nodes.filter(n=>seen.has(n.id));

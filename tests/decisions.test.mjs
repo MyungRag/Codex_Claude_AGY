@@ -45,8 +45,48 @@ test('conflicts link two real decisions and re-open when a related answer change
  const removed=changePlan(p,'질문 삭제',x=>{x.items=x.items.filter(i=>i.id!==ids[0]);});assert.ok(!removed.items.some(i=>i.id===conflict));assert.deepEqual(travelHistory(removed,'undo').items,p.items);
 });
 
-test('readiness gates important unanswered questions, conflicts and missing criteria; explicit deferral and immutable baselines survive backup',()=>{
- let {p,a,b}=sample();p=changePlan(p,'질문',x=>addDecision(x,question([a.id])));assert.equal(readiness(project,p).ready,false);assert.throws(()=>finalizePlan(project,p),/중요/);
+test('important unanswered questions, checks and constraints survive finalization and handoff without being answered or deferred',()=>{
+ let {p,a,b}=sample();
+ p=changePlan(p,'미답변 항목',x=>{
+  addDecision(x,question([x.rootId],{question:'첫 배포 대상은 누구인가요?'}));
+  addDecision(x,question([a.id],{type:'verification',question:'가격 데이터 계약 범위를 확인했나요?'}));
+  addDecision(x,question([b.id],{type:'constraint',question:'월별 API 비용 한도는 얼마인가요?'}));
+ });
+ const before=structuredClone(p.items);assert.equal(readiness(project,p).blocking.length,3);assert.equal(readiness(project,p).ready,true);
+ p=finalizePlan(project,p,'미답변은 구현 전에 검토');assert.deepEqual(p.items,before);assert.equal(readiness(project,p).current,true);
+ const baseline=p.baselines[0],snapshot=structuredClone(baseline.snapshot);
+ for(const item of before){
+  const saved=baseline.snapshot.items.find(i=>i.id===item.id);
+  assert.equal(saved.answer,'');assert.equal(saved.status,item.type==='question'?'answer':'check');
+  assert.equal(saved.blocking,true);assert.equal(saved.deferred,false);assert.equal(saved.deferReason,'');
+ }
+ p=saveAssignments(p,baseline.id,createAssignments(baseline));const document=handoffDocument(p.baselines[0],p.handoffs[0]);
+ for(const item of before)assert.ok(document.includes(item.question),item.question);
+ assert.match(document,/미정/);assert.equal(readiness(project,p).current,true);
+ p=reply(p,before[0].id,'내부 사용자');assert.equal(readiness(project,p).current,false);assert.deepEqual(p.baselines[0].snapshot,snapshot);
+ p=finalizePlan(project,p,'배포 대상 결정');assert.equal(p.baselines[1].number,2);
+ assert.equal(p.baselines[1].snapshot.items.find(i=>i.id===before[0].id).answer,'내부 사용자');
+ assert.equal(p.baselines[0].snapshot.items.find(i=>i.id===before[0].id).answer,'');
+ assert.equal(p.items.filter(i=>i.status!=='done').length,2);
+});
+
+test('finalization still requires work nodes and criteria, and unresolved conflicts require resolution or explicit deferral',()=>{
+ const empty=createPlan(project);assert.equal(readiness(project,empty).ready,false);assert.throws(()=>finalizePlan(project,empty));
+ let {p,a,b}=sample();const missing=changePlan(p,'기준 지움',x=>editNode(x,a.id,{...a,criteria:''}));
+ assert.equal(readiness(project,missing).missing.length,1);assert.equal(readiness(project,missing).ready,false);assert.throws(()=>finalizePlan(project,missing));
+ p=changePlan(p,'질문',x=>{addDecision(x,question([a.id]));addDecision(x,question([b.id],{question:'세금도 포함하나요?'}));});
+ p=reply(p,p.items[0].id,'총액');p=reply(p,p.items[1].id,'세금 제외');const ids=p.items.map(i=>i.id);
+ p=changePlan(p,'충돌',x=>addDecision(x,question([a.id],{type:'conflict',relatedIds:ids,question:'총액과 세금 제외 중 어느 쪽인가요?',blocking:false})));
+ const conflict=p.items.at(-1);assert.equal(readiness(project,p).blocking.length,0);assert.equal(readiness(project,p).conflicts.length,1);
+ assert.equal(readiness(project,p).ready,false);assert.throws(()=>finalizePlan(project,p));
+ const resolved=reply(p,conflict.id,'총액으로 통일');assert.equal(readiness(project,resolved).ready,true);
+ p=changePlan(p,'충돌 보류',x=>updateDecision(x,conflict.id,{deferReason:'가격 표시 작업 전 협의'},'defer'));
+ assert.equal(readiness(project,p).ready,true);p=finalizePlan(project,p);
+ assert.equal(p.baselines[0].snapshot.items.find(i=>i.id===conflict.id).deferReason,'가격 표시 작업 전 협의');
+});
+
+test('explicit deferral and immutable baselines survive edits and backup',()=>{
+ let {p,a,b}=sample();p=changePlan(p,'질문',x=>addDecision(x,question([a.id])));assert.equal(readiness(project,p).ready,true);
  p=changePlan(p,'보류',x=>updateDecision(x,x.items[0].id,{deferReason:'실데이터 연동 전 확인'},'defer'));assert.equal(readiness(project,p).ready,true);
  const missing=changePlan(p,'기준 지움',x=>editNode(x,a.id,{...a,criteria:''}));assert.equal(readiness(project,missing).missing.length,1);
  p=finalizePlan(project,p,'1차 범위');assert.equal(readiness(project,p).current,true);assert.throws(()=>finalizePlan(project,p),/이미 확정/);

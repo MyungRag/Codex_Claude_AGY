@@ -40,9 +40,24 @@ test('runner reports the selected version and live CLI model before a timed-out 
  assert.ok((await r.status()).find(a=>a.id==='claude').verified);assert.ok(supportedEfforts('claude',{model:'sonnet'},r.catalogView('claude')).includes('max'));
 });
 
-test('selected wait limit reaches the process and is bounded; AGY internal deadline matches it',async t=>{
- assert.throws(()=>validateSettings('claude',{waitMinutes:0}),/대기 시간/);assert.throws(()=>validateSettings('claude',{waitMinutes:Infinity}),/대기 시간/);
+test('unlimited is accepted and explicit finite wait limits reach the process and AGY deadline',async t=>{
+ assert.equal(validateSettings('claude',{waitMinutes:0}).waitMinutes,0);for(const waitMinutes of [-1,1,Infinity,NaN,'0'])assert.throws(()=>validateSettings('claude',{waitMinutes}),/대기 시간/);
  const timeouts=[],r=new AgentRunner({resolve,catalog:async()=>catalog,run:(exe,args,opts)=>{if(args.includes('--json-schema'))timeouts.push(opts.timeout);return runProcess(exe,args,opts);}});t.after(()=>r.close());
  const job=r.create({agent:'claude',prompt:'연결 확인 요청',kind:'probe',requestId:crypto.randomUUID(),settings:{model:'sonnet',effort:'max',waitMinutes:10}});await r.jobs.get(job.id).done;assert.equal(r.get(job.id).status,'succeeded');assert.deepEqual(timeouts,[600000]);
+ for(const settings of [{},{waitMinutes:0}])assert.ok(!invocation('agy',{prompt:'task',settings}).args.includes('--print-timeout'));
  const agy=invocation('agy',{prompt:'task',settings:{waitMinutes:20}});assert.equal(agy.args[agy.args.indexOf('--print-timeout')+1],'20m');
+});
+
+
+test('default and explicit unlimited jobs keep running until cancelled, including an explicit override of a finite runner limit',async t=>{
+ for(const [options,settings] of [[{},{}],[{timeout:40},{waitMinutes:0}]]){
+  const r=new AgentRunner({resolve,...options});t.after(()=>r.close());
+  await r.status();const created=r.create({agent:'claude',prompt:'fixture:hang',requestId:crypto.randomUUID(),settings});
+  assert.equal(created.timeoutMs,0);
+  for(let i=0;i<100&&r.get(created.id).progress?.phase!=='receiving';i++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(r.get(created.id).progress?.phase,'receiving');
+  await new Promise(resolve=>setTimeout(resolve,80));assert.equal(r.get(created.id).status,'running');
+  assert.equal(r.cancel(created.id).status,'cancelled');await r.jobs.get(created.id).done;
+  assert.equal(r.get(created.id).status,'cancelled');assert.equal(r.get(created.id).errorCode,undefined);
+ }
 });

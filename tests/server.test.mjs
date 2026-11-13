@@ -48,11 +48,40 @@ test('non-Windows keeps browser picking and static routes do not expose source f
 
 test('versioned planner assets and nested module imports are served with correct MIME types',async t=>{
   const {origin}=await listen(t);
-  const html=await (await fetch(origin)).text();assert.match(html,/planning\.css\?v=0\.7\.0/);
+  const html=await (await fetch(origin)).text();assert.match(html,/planning\.css\?v=0\.8\.0/);
   for(const name of ['app.js','model.js','storage.js','planning.js','planning-model.js','planning.css']){
-    const response=await fetch(`${origin}/${name}?v=0.7.0`);
+    const response=await fetch(`${origin}/${name}?v=0.8.0`);
     assert.equal(response.status,200,name);
     assert.match(response.headers.get('content-type'),name.endsWith('.css')?/text\/css/:/javascript/);
     assert.ok((await response.text()).length>100);
+  }
+});
+
+test('the browser entry point and every transitive module import are served',async t=>{
+  const {origin}=await listen(t);
+  const html=await (await fetch(origin)).text();
+  const entry=html.match(/<script\s+type="module"\s+src="([^"]+)"/);
+  assert.ok(entry,'the page must declare its browser module entry point');
+  const pending=[new URL(entry[1],origin).href], visited=new Set();
+  while(pending.length){
+    const url=pending.shift();
+    if(visited.has(url))continue;
+    visited.add(url);
+    const response=await fetch(url);
+    assert.equal(response.status,200,`browser module ${url}`);
+    assert.match(response.headers.get('content-type')||'',/javascript/,url);
+    const source=await response.text();
+    // Follow the app's static imports/re-exports, including version query strings and cycles.
+    for(const match of source.matchAll(/^\s*(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]/gm)){
+      const specifier=match[1];
+      if(!specifier.startsWith('.')&&!specifier.startsWith('/'))continue;
+      const dependency=new URL(specifier,url);
+      assert.equal(dependency.origin,origin,'browser modules must stay on this server');
+      pending.push(dependency.href);
+    }
+  }
+  const modules=new Set([...visited].map(url=>new URL(url).pathname));
+  for(const name of ['decision-ui.js','decision-core.js','decision-model.js','decision-ai-ui.js']){
+    assert.ok(modules.has(`/${name}`),`the decision workflow must load ${name}`);
   }
 });
