@@ -57,7 +57,16 @@ export async function handleDecisionClick(host,event){
   host.agentDialogOpen=true;await openDecisionAI({project:host.project,plan:p,kind,nodeIds,prompt,onClose:()=>{host.agentDialogOpen=false;},onApply:async(jobs,baseChange,reviewed)=>{
    if(host.stale||host.plan.changeNumber!==baseChange)throw new Error('요청 후 기획이 변경되었습니다. 현재 기획으로 다시 검토해 주세요.');
    let next;if(kind==='handoff')next=saveAssignments(host.plan,base.id,jobs[0].result.tasks,jobs[0].agent);else next=applyDecisionReviews(host.plan,jobs,reviewed,kind);
-   if(!await host.persist(next,()=>{s.newItem=false;host.toast(kind==='handoff'?'AI 업무 분담안을 저장했습니다. 편집 후 분담서를 내려받으세요.':'질문·확인 항목을 반영했습니다.');}))throw new Error('저장하지 못했습니다. 응답은 유지됩니다.');
+   const previous=new Map(host.plan.items.map(item=>[item.id,item]));
+   const added=next.items.filter(item=>!previous.has(item.id)),updated=next.items.filter(item=>previous.has(item.id)&&JSON.stringify(item)!==JSON.stringify(previous.get(item.id)));
+   if(!await host.persist(next,()=>{
+    s.newItem=false;
+    if(kind==='handoff'){host.toast('AI 업무 분담안을 저장했습니다. 편집 후 분담서를 내려받으세요.');return;}
+    // Reveal the saved result even when the previous tab or restored node filter hides it.
+    const item=added[0]||updated[0];
+    if(item){host.page='decisions';s.tab=item.status;s.selected=item.id;if(s.node&&!item.nodeIds.includes(s.node))s.node='';}
+    host.toast(added.length?`질문·확인 항목 ${added.length}개를 추가했습니다. 답변 필요 ${added.filter(i=>i.status==='answer').length}개 · 확인 필요 ${added.filter(i=>i.status==='check').length}개${updated.length?` · 기존 항목 ${updated.length}개 갱신`:''}`:updated.length?`기존 항목 ${updated.length}개의 AI 의견을 갱신했습니다.`:'검토를 반영했습니다. 새로 추가되거나 변경된 질문·확인 항목은 없습니다.');
+   }))throw new Error('저장하지 못했습니다. 응답은 유지됩니다.');
   }});
  }
  if(action==='export-handoff'){const base=p.baselines.find(b=>b.id===s.baseline)||p.baselines.at(-1),handoff=p.handoffs.find(h=>h.baselineId===base.id);const url=URL.createObjectURL(new Blob([handoffDocument(base,handoff)],{type:'text/markdown;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='agent-desk-handoff-v'+base.number+'.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}

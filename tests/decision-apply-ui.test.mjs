@@ -1,0 +1,114 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
+import {createPlan,addNode,validatePlan} from '../public/planning-model.js?v=0.8.0';
+import {addDecision,updateDecision} from '../public/decision-model.js?v=0.8.0';
+
+const until=async check=>{for(let n=0;n<100;n++){if(check())return;await new Promise(r=>setTimeout(r,5));}assert.fail('Decision application did not finish');};
+const proposal=(nodeId,type='question',question='어떤 가격을 비교하나요?')=>({type,nodeIds:[nodeId],relatedIds:[],question,reason:'구현 범위 확인',evidence:'사용자 확인 필요',options:[],blocking:true});
+const job=(id,items,agent='codex',include=true)=>({id,agent,status:'succeeded',include,result:{summary:'질문 검토 완료',items}});
+
+async function setup(t){
+ const {window}=new JSDOM('<main id="planning-root"></main>',{url:'https://agent-desk.test/'});
+ for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
+ window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+ window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+ const {mountPlanner}=await import('../public/planning.js?v=0.8.0');
+ const {handleDecisionClick}=await import('../public/decision-ui.js?v=0.8.0');
+ const project={id:'apply-review',name:'질문 반영',description:'선택 결과 반영 확인',instructions:''};
+ project.planning=createPlan(project);
+ const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',criteria:'최종 가격 표시'});
+ const other=addNode(project.planning,project.planning.rootId,{title:'예약',criteria:'예약 완료 표시'});
+ let saved=structuredClone(project.planning),failSave=false;const messages=[];
+ const host=mountPlanner(document.querySelector('main'),{project,revision:0,icon:()=>'',toast:m=>messages.push(m),exportProject(){},save:async(next,revision)=>{if(failSave)throw new Error('저장 실패');saved=validatePlan(next);return revision+1;}});
+ host.page='decisions';host.render();
+ t.after(()=>{host.destroy();window.close();});
+ const key='agent-desk-decisions-'+project.id+'-questions';
+ const open=async(jobs,nodeIds=[work.id],baseChange=host.plan.changeNumber)=>{
+  sessionStorage.setItem(key,JSON.stringify({jobs,nodeIds,baseChange}));
+  await handleDecisionClick(host,{target:document.querySelector('[data-dec="ai-questions"]'),preventDefault(){}});
+ };
+ const apply=async()=>{document.querySelector('[data-dai="apply"]').click();await until(()=>!document.querySelector('.agent-dialog'));};
+ return {host,work,other,open,apply,key,messages,saved:()=>saved,failSave:value=>{failSave=value;}};
+}
+
+test('applying constraints opens the saved item in the check tab and preserves it after serialization',async t=>{
+ const ctx=await setup(t);await ctx.open([job('constraint-run',[proposal(ctx.work.id,'constraint','예산 한도는 얼마인가요?')])]);
+ await ctx.apply();assert.equal(ctx.saved().items.length,1);assert.equal(ctx.saved().items[0].status,'check');
+ assert.equal(document.querySelector('[role="tab"][aria-selected="true"]').dataset.tab,'check');
+ assert.match(document.querySelector('.decision-detail').textContent,/예산 한도/);
+ assert.equal(sessionStorage.getItem(ctx.key),null);
+ ctx.host.plan=validatePlan(JSON.parse(JSON.stringify(ctx.saved())));ctx.host.render();
+ assert.match(document.querySelector('.decision-list').textContent,/예산 한도/);
+});
+
+test('applying questions from the completed tab selects the new unanswered question',async t=>{
+ const ctx=await setup(t);const previous=addDecision(ctx.host.plan,proposal(ctx.work.id,'question','기존 확정 질문'));
+ updateDecision(ctx.host.plan,previous.id,{answer:'기존 답변'},'confirm');
+ ctx.host.decisionState.tab='done';ctx.host.render();
+ await ctx.open([job('question-run',[proposal(ctx.work.id)])]);await ctx.apply();
+ assert.equal(document.querySelector('[role="tab"][aria-selected="true"]').dataset.tab,'answer');
+ assert.match(document.querySelector('.decision-detail').textContent,/어떤 가격/);
+ assert.equal(ctx.saved().items.find(i=>i.id===previous.id).answer,'기존 답변');
+ assert.equal(ctx.saved().items.find(i=>i.id===previous.id).status,'done');
+});
+
+test('restored review results remain visible when the current node filter differs from the reviewed node',async t=>{
+ const ctx=await setup(t);ctx.host.decisionState.node=ctx.other.id;ctx.host.render();
+ await ctx.open([job('restored-run',[proposal(ctx.work.id)])]);await ctx.apply();
+ assert.match(document.querySelector('.decision-list').textContent,/어떤 가격/);
+ assert.equal(document.querySelector('#decision-answer').dataset.itemId,ctx.saved().items[0].id);
+});
+
+test('changing included responses updates the apply button and applies only selected successful jobs',async t=>{
+ const ctx=await setup(t);
+ await ctx.open([job('codex-run',[proposal(ctx.work.id)]),job('claude-run',[proposal(ctx.work.id,'constraint','예산 한도는?')],'claude',false)]);
+ document.querySelector('[data-dai-include="codex"]').click();
+ assert.equal(document.querySelector('[data-dai="apply"]').disabled,true);
+ document.querySelector('[data-dai-include="claude"]').click();
+ assert.equal(document.querySelector('[data-dai="apply"]').disabled,false);
+ await ctx.apply();assert.equal(ctx.saved().items.length,1);
+ assert.equal(ctx.saved().items[0].question,'예산 한도는?');
+ assert.deepEqual(ctx.saved().appliedRuns,['claude-run']);
+});
+
+test('an initially unselected restored result can be selected and applied',async t=>{
+ const ctx=await setup(t);await ctx.open([job('unselected-run',[proposal(ctx.work.id)],'codex',false)]);
+ assert.equal(document.querySelector('[data-dai="apply"]').disabled,true);
+ document.querySelector('[data-dai-include="codex"]').click();
+ assert.equal(document.querySelector('[data-dai="apply"]').disabled,false);
+ await ctx.apply();assert.equal(ctx.saved().items.length,1);
+});
+
+test('failed persistence preserves the review and selection for retry',async t=>{
+ const ctx=await setup(t);const before=structuredClone(ctx.host.decisionState);ctx.failSave(true);
+ await ctx.open([job('retry-run',[proposal(ctx.work.id,'constraint')])]);
+ document.querySelector('[data-dai="apply"]').click();await until(()=>document.querySelector('.agent-error')?.textContent.includes('저장하지 못했습니다'));
+ assert.deepEqual(ctx.host.decisionState,before);assert.equal(ctx.saved().items.length,0);
+ assert.ok(sessionStorage.getItem(ctx.key));ctx.failSave(false);await ctx.apply();
+ assert.equal(ctx.saved().items.length,1);assert.equal(sessionStorage.getItem(ctx.key),null);
+});
+
+test('a stale review is rejected without clearing pending results or changing the plan',async t=>{
+ const ctx=await setup(t);await ctx.open([job('stale-run',[proposal(ctx.work.id)])],[ctx.work.id],ctx.host.plan.changeNumber+1);
+ document.querySelector('[data-dai="apply"]').click();await until(()=>document.querySelector('.agent-error')?.textContent.includes('기획이 변경'));
+ assert.equal(ctx.saved().items.length,0);assert.ok(sessionStorage.getItem(ctx.key));
+});
+
+test('an empty proposal saves review coverage and explains that no questions changed',async t=>{
+ const ctx=await setup(t);await ctx.open([job('empty-run',[])]);await ctx.apply();
+ assert.equal(ctx.saved().items.length,0);assert.equal(ctx.saved().questionCoverage[0].nodeId,ctx.work.id);
+ assert.match(ctx.messages.at(-1),/새로 추가되거나 변경된 질문·확인 항목은 없습니다/);
+});
+
+test('a duplicate proposal opens the updated source on the existing confirmed answer',async t=>{
+ const ctx=await setup(t),input=proposal(ctx.work.id),previous=addDecision(ctx.host.plan,input);
+ updateDecision(ctx.host.plan,previous.id,{answer:'세금 포함',evidence:'사용자가 확인함'},'confirm');
+ ctx.host.render();await ctx.open([job('duplicate-run',[input])]);await ctx.apply();
+ assert.equal(ctx.saved().items.length,1);assert.equal(ctx.saved().items[0].status,'done');
+ assert.equal(ctx.saved().items[0].answer,'세금 포함');assert.equal(ctx.saved().items[0].evidence,'사용자가 확인함');
+ assert.equal(ctx.saved().items[0].sources.length,1);
+ assert.equal(document.querySelector('[role="tab"][aria-selected="true"]').dataset.tab,'done');
+ assert.equal(document.querySelector('#decision-answer').dataset.itemId,previous.id);
+ assert.match(ctx.messages.at(-1),/기존 항목 1개의 AI 의견/);
+});
