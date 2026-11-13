@@ -1,4 +1,4 @@
-import {runner,isLocal} from './agent-client.js?v=0.9.1';
+import {runner,isLocal} from './agent-client.js?v=0.9.2';
 
 const ROOT='/api/agents/development';
 const identifier=value=>{if(!/^[\w-]{1,80}$/.test(value||''))throw new Error('프로젝트 또는 실행 기록의 ID가 올바르지 않습니다.');return encodeURIComponent(value);};

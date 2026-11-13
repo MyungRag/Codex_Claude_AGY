@@ -1,5 +1,5 @@
-import {validateDevelopment} from './development-core.js?v=0.9.1';
-import {validatePlan} from './planning-model.js?v=0.9.1';
+import {validateDevelopment} from './development-core.js?v=0.9.2';
+import {validatePlan} from './planning-model.js?v=0.9.2';
 export const COLORS = ['mint', 'blue', 'orange', 'violet', 'pink'];
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 10 * 1024 * 1024;

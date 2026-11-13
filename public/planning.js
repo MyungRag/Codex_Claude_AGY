@@ -1,9 +1,9 @@
-import {executionOrder,executionWaves,normalizeExecutionMeta} from './execution-order.js?v=0.9.1';
-import {decisionWorkspace,decisionCount,handleDecisionClick,handleDecisionSubmit,decisionInput} from './decision-ui.js?v=0.9.1';
-import {openOrganizer} from './organize-ui.js?v=0.9.1';
-import {openConnections,openAgentReview,paintConnections} from './agent-ui.js?v=0.9.1';
-import {runner} from './agent-client.js?v=0.9.1';
-import {AGENTS,NODE_WIDTH,NODE_HEIGHT,validatePlan,createPlan,createDemo,changePlan,travelHistory,addNode,editNode,removeNode,moveUnder,mergeFields,mergeNodes,layoutPlan,visibleNodes,childrenOf,descendants,nodeSources,similarPairs,parseProposals,importProposals,appendMessage,reviewPrompt} from './planning-model.js?v=0.9.1';
+import {executionOrder,executionWaves,normalizeExecutionMeta} from './execution-order.js?v=0.9.2';
+import {decisionWorkspace,decisionCount,handleDecisionClick,handleDecisionSubmit,decisionInput} from './decision-ui.js?v=0.9.2';
+import {openOrganizer} from './organize-ui.js?v=0.9.2';
+import {openConnections,openAgentReview,paintConnections} from './agent-ui.js?v=0.9.2';
+import {runner} from './agent-client.js?v=0.9.2';
+import {AGENTS,NODE_WIDTH,NODE_HEIGHT,validatePlan,createPlan,createDemo,changePlan,travelHistory,addNode,editNode,removeNode,moveUnder,mergeFields,mergeNodes,layoutPlan,visibleNodes,childrenOf,descendants,nodeSources,similarPairs,parseProposals,importProposals,appendMessage,reviewPrompt} from './planning-model.js?v=0.9.2';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statuses={draft:'초안',review:'결정 필요',confirmed:'확정'};
 const time=value=>new Intl.DateTimeFormat('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value));

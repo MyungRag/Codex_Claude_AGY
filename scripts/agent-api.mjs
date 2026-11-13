@@ -1,8 +1,9 @@
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {AgentRunner,RUNNER_VERSION} from './agent-runner.mjs';
+import {AGENT_JOB_BODY_LIMIT} from '../public/agent-limits.js';
 export const DASHBOARD_ORIGIN='https://agent-desk-projects-mr.opal-loach-5509.chatgpt.site';
 const reply=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
-async function body(req){const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>600000)throw new Error('요청이 너무 큽니다. 기획 범위를 줄여 주세요.');chunks.push(part);}return JSON.parse(Buffer.concat(chunks).toString('utf8'));}
+async function body(req,limit=600000){const chunks=[];let size=0;for await(const part of req){size+=part.length;if(size>limit)throw Object.assign(new Error(`전송할 검토 자료가 너무 큽니다 (최대 ${limit.toLocaleString('ko-KR')}바이트). 기존 응답을 보관한 채 통합 대상이나 검토 범위를 줄여 주세요.`),{code:'REQUEST_TOO_LARGE'});chunks.push(part);}return JSON.parse(Buffer.concat(chunks).toString('utf8'));}
 export function createAgentAPI({runner=new AgentRunner(),developmentRunner,developmentDataRoot}={}){
   const token=randomBytes(32).toString('hex');
   let development=developmentRunner,developmentPromise;
@@ -44,16 +45,16 @@ export function createAgentAPI({runner=new AgentRunner(),developmentRunner,devel
         const result=releaseAction==='launch'?await service.launch(projectId,releaseId,...(payload?.requestId?[{requestId:payload.requestId}]:[])):action?await service[action](projectId,payload):await service.get(projectId);
         reply(res,200,result);return;
       }
-      if(pathname==='/api/agents/status'&&req.method==='GET'){reply(res,200,{version:RUNNER_VERSION,platform:process.platform,features:{modelSelection:true,modelCapabilities:true,requestTiming:true,unlimitedWait:true,requestCancellation:true,planningDecisions:true,leadReview:true,usage:true,organize:true,development:true},catalogs:Object.fromEntries(['codex','claude','agy'].map(id=>[id,runner.catalogView(id)]).filter(([,c])=>c)),usage:runner.usage(),agents:await runner.status()});return;}
-      if(pathname==='/api/agents/refresh'&&req.method==='POST'){reply(res,200,{version:RUNNER_VERSION,platform:process.platform,features:{modelSelection:true,modelCapabilities:true,requestTiming:true,unlimitedWait:true,requestCancellation:true,planningDecisions:true,leadReview:true,usage:true,organize:true,development:true},catalogs:Object.fromEntries(['codex','claude','agy'].map(id=>[id,runner.catalogView(id)]).filter(([,c])=>c)),usage:runner.usage(),agents:await runner.status(true)});return;}
+      if(pathname==='/api/agents/status'&&req.method==='GET'){reply(res,200,{version:RUNNER_VERSION,platform:process.platform,features:{modelSelection:true,modelCapabilities:true,requestTiming:true,unlimitedWait:true,requestCancellation:true,planningDecisions:true,leadReview:true,largeReviewContext:true,usage:true,organize:true,development:true},catalogs:Object.fromEntries(['codex','claude','agy'].map(id=>[id,runner.catalogView(id)]).filter(([,c])=>c)),usage:runner.usage(),agents:await runner.status()});return;}
+      if(pathname==='/api/agents/refresh'&&req.method==='POST'){reply(res,200,{version:RUNNER_VERSION,platform:process.platform,features:{modelSelection:true,modelCapabilities:true,requestTiming:true,unlimitedWait:true,requestCancellation:true,planningDecisions:true,leadReview:true,largeReviewContext:true,usage:true,organize:true,development:true},catalogs:Object.fromEntries(['codex','claude','agy'].map(id=>[id,runner.catalogView(id)]).filter(([,c])=>c)),usage:runner.usage(),agents:await runner.status(true)});return;}
       if(pathname==='/api/agents/usage'&&req.method==='GET'){reply(res,200,runner.usage());return;}
       const catalog=pathname.match(/^\/api\/agents\/models\/(codex|claude|agy)$/);if(catalog&&req.method==='GET'){reply(res,200,await runner.models(catalog[1]));return;}
-      if(pathname==='/api/agents/jobs'&&req.method==='POST'){reply(res,202,runner.create(await body(req)));return;}
+      if(pathname==='/api/agents/jobs'&&req.method==='POST'){reply(res,202,runner.create(await body(req,AGENT_JOB_BODY_LIMIT)));return;}
       const requestCancel=pathname.match(/^\/api\/agents\/requests\/([\w-]{8,80})\/cancel$/);
       if(requestCancel&&req.method==='POST'){reply(res,200,runner.cancelRequest(requestCancel[1]));return;}
       const match=pathname.match(/^\/api\/agents\/jobs\/([\w-]{1,80})(\/cancel)?$/);
       if(match&&req.method===(match[2]?'POST':'GET')){const job=match[2]?runner.cancel(match[1]):runner.get(match[1]);reply(res,job?200:404,job||{error:'요청 기록이 없습니다. 실행기가 재시작되었을 수 있습니다.'});return;}
       reply(res,404,{error:'알 수 없는 에이전트 요청입니다.'});
-    }catch(error){reply(res,[400,404,409,422].includes(error.status)?error.status:400,{error:error instanceof SyntaxError?'JSON 요청 형식을 확인해 주세요.':error.message});}
+    }catch(error){reply(res,[400,404,409,422].includes(error.status)?error.status:400,{error:error instanceof SyntaxError?'JSON 요청 형식을 확인해 주세요.':error.message,...(error.code?{code:error.code}:{}),...(error.details?{details:error.details}:{})});}
   }};
 }

@@ -21,7 +21,7 @@ test('questions page reviews three agents, previews partial success, confirms in
  for(const k of ['window','document','localStorage','sessionStorage','history','location','FormData'])globalThis[k]=k==='window'?window:window[k];globalThis.indexedDB=new IDBFactory();globalThis.BroadcastChannel=undefined;globalThis.fetch=(url,opts)=>nativeFetch(new URL(url,base),opts);
  window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
  let downloaded;URL.createObjectURL=blob=>{downloaded=blob;return 'blob:test';};URL.revokeObjectURL=()=>{};window.HTMLAnchorElement.prototype.click=function(){};
- const storage=await import('../public/storage.js?v=0.9.1');await storage.openStore();const project=validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교'});project.planning=createPlan(project);const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',instructions:'최종 가격 비교',criteria:'세금 포함 가격'});project.planning.edges[0].to='work-a';work.id='work-a';await storage.saveState({projects:[project]},0);await import('../public/app.js');
+ const storage=await import('../public/storage.js?v=0.9.2');await storage.openStore();const project=validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교'});project.planning=createPlan(project);const work=addNode(project.planning,project.planning.rootId,{title:'가격 비교',instructions:'최종 가격 비교',criteria:'세금 포함 가격'});project.planning.edges[0].to='work-a';work.id='work-a';await storage.saveState({projects:[project]},0);await import('../public/app.js');
  const $=s=>document.querySelector(s),click=s=>{assert.ok($(s),s);$(s).click();},fill=(s,v)=>{assert.ok($(s),s);$(s).value=v;$(s).dispatchEvent(new window.Event('input',{bubbles:true}));},submit=(s,action)=>$(s).dispatchEvent(new window.SubmitEvent('submit',{bubbles:true,cancelable:true,submitter:action?$(s+` [value="${action}"]`):null}));const saved=async()=>(await storage.readState()).projects[0].planning;const waitSave=async old=>until(async()=> (await saved()).changeNumber>old&&!$('#planning-root[aria-busy]'));
  click('[data-action="open"][data-id="kaf"]');await until(()=>location.hash==='#kaf');click('[data-action="planning"]');click('[data-pa="page-decisions"]');assert.ok($('.decision-workspace'));assert.equal(document.querySelectorAll('[role="tab"]').length,3);
  click('[data-dec="ai-questions"]');await until(()=>$('#lead-review-form')&&!$('#lead-review-form .primary').disabled);submit('#lead-review-form');await until(()=>$('[data-lr="apply"]')&&!$('[data-lr="apply"]').disabled);
@@ -39,8 +39,8 @@ test('questions page reviews three agents, previews partial success, confirms in
 });
 
 test('finalization accepts acknowledged unanswered important questions and carries them into the baseline and handoff',async t=>{
- const {decisionWorkspace,handleDecisionSubmit}=await import('../public/decision-ui.js?v=0.9.1');
- const {addDecision,handoffDocument}=await import('../public/decision-model.js?v=0.9.1');
+ const {decisionWorkspace,handleDecisionSubmit}=await import('../public/decision-ui.js?v=0.9.2');
+ const {addDecision,handoffDocument}=await import('../public/decision-model.js?v=0.9.2');
  const {window}=new JSDOM('<main id="planning-root"></main>');
  const previousFormData=globalThis.FormData;globalThis.FormData=window.FormData;
  t.after(()=>{globalThis.FormData=previousFormData;window.close();});

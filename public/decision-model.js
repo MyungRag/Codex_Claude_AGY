@@ -1,6 +1,6 @@
-import {changePlan,AGENTS} from './planning-model.js?v=0.9.1';
-import {normalizeExecutionMeta,executionOrder} from './execution-order.js?v=0.9.1';
-import {ensure,text,recordId,array,decisionSnapshot,snapshotKey,nodeFingerprint,questionKey,validateTasks,recommendation} from './decision-core.js?v=0.9.1';
+import {changePlan,AGENTS} from './planning-model.js?v=0.9.2';
+import {normalizeExecutionMeta,executionOrder} from './execution-order.js?v=0.9.2';
+import {ensure,text,recordId,array,decisionSnapshot,snapshotKey,nodeFingerprint,questionKey,validateTasks,recommendation} from './decision-core.js?v=0.9.2';
 const now=()=>new Date().toISOString(),uid=()=>crypto.randomUUID();
 export function parseDecisionProposal(raw,{maxItems=60}={}){
  ensure(raw&&typeof raw==='object','AI 질문 응답을 확인해 주세요.');return {summary:text(raw.summary,6000,'검토 설명'),items:array(raw.items,maxItems,'AI 질문').map(i=>{

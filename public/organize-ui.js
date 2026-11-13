@@ -1,8 +1,8 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.9.1';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.1';
-import {modelControls,readModelControls,syncModelControl,jobMetadataHTML,esc} from './model-controls.js?v=0.9.1';
-import {organizePlan,organizationPrompt} from './organize-model.js?v=0.9.1';
-import {openConnections} from './agent-ui.js?v=0.9.1';
+import {openLeadReview} from './lead-review-ui.js?v=0.9.2';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.9.2';
+import {modelControls,readModelControls,syncModelControl,jobMetadataHTML,esc} from './model-controls.js?v=0.9.2';
+import {organizePlan,organizationPrompt,organizationSynthesisPrompt} from './organize-model.js?v=0.9.2';
+import {openConnections} from './agent-ui.js?v=0.9.2';
 export function organizationExecutionHTML(node,nodes){
  const name=id=>nodes.find(n=>n.id===id)?.title||id;
  const dependencies=(node.dependsOn||[]).map(id=>esc(name(id))).join(' · ');
@@ -13,7 +13,7 @@ export async function openOrganizer({project,plan,selectedIds,onApply,onClose}){
  let legacy=false;try{const saved=JSON.parse(sessionStorage.getItem('agent-desk-organize-'+project.id)||'null');legacy=!!saved?.job&&!saved.version;}catch{}
  if(!legacy)return openLeadReview({project,plan,kind:'organize',nodeIds:selectedIds,onClose,
   prompt:(instruction,scope)=>organizationPrompt(project,plan,scope,instruction),
-  synthesize:(jobs,instruction,scope)=>organizationPrompt(project,plan,scope,instruction)+'\n당신은 주 AI입니다. 다음 독립 검토들의 중복과 의견 차이를 정리해 최종 정리안 하나를 만드세요. 원본 선택 노드를 빠짐없이 추적하고 누락 없이 요구사항을 보존하세요. 얕은 2단계 구조로 고정하지 말고 기능 포함 관계에 필요한 깊이까지 구성하세요. 독립 검토 원본: '+JSON.stringify(jobs.map(j=>({agent:j.agent,result:j.result}))),
+  synthesize:(jobs,instruction,scope)=>organizationSynthesisPrompt(project,plan,scope,jobs,instruction),
   validate:(result,jobs,instruction,scope)=>{organizePlan(plan,scope,result,{agent:'codex'});return result;},
   preview:(result,scope)=>`<div class="organize-summary">${scope.length}개 선택 → ${result.nodes.length}개로 정리</div>`+'<div class="organize-preview-tree">'+result.nodes.map(n=>{let depth=0,parent=n.parentId;while(parent&&depth<99){depth++;parent=result.nodes.find(x=>x.id===parent)?.parentId;}return `<article style="margin-left:${Math.min(depth,12)*18}px"><h3>${esc(n.title)}</h3><small>깊이 ${depth+1} · ${esc(n.parentId?result.nodes.find(x=>x.id===n.parentId)?.title:'전체 목표')}</small><p>${esc(n.description)}</p>${organizationExecutionHTML(n,[...result.nodes,...plan.nodes])}<p>완료 기준: ${esc(n.criteria)}</p><p>${esc(n.reason)}</p></article>`;}).join('')+'</div>'+result.excluded.map(x=>`<p class="decision-warning">제외: ${esc(plan.nodes.find(n=>n.id===x.id)?.title)} · ${esc(x.reason)}</p>`).join(''),
   onApply:async data=>{const next=organizePlan(plan,data.nodeIds,data.result,{agent:data.lead,runId:data.id,instruction:data.instruction,review:data});await onApply(next,data.baseChange);}
