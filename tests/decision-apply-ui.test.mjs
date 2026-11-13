@@ -80,6 +80,23 @@ test('an initially unselected restored result can be selected and applied',async
  await ctx.apply();assert.equal(ctx.saved().items.length,1);
 });
 
+test('completed results can be applied while refreshing agent connections is still pending',async t=>{
+ const ctx=await setup(t),{runner}=await import('../public/agent-client.js?v=0.8.0');
+ const originalRequest=runner.request,originalRefresh=runner.refresh;
+ let finishRefresh,refreshStarted=false;
+ const refresh=new Promise(resolve=>{finishRefresh=resolve;});
+ const completed=job('completed-before-refresh',[proposal(ctx.work.id)]);
+ runner.request=async path=>{assert.equal(path,'/api/agents/jobs/'+completed.id);return completed;};
+ runner.refresh=async()=>{refreshStarted=true;await refresh;};
+ const opening=ctx.open([{id:completed.id,agent:'codex',status:'running'}]);
+ t.after(async()=>{finishRefresh();await opening;runner.request=originalRequest;runner.refresh=originalRefresh;});
+ await until(()=>refreshStarted&&document.querySelector('.review-results')?.textContent.includes('응답 도착'));
+ assert.equal(document.querySelector('[data-dai="apply"]').disabled,false,'finished reviews must not wait for unrelated CLI connection checks');
+ await ctx.apply();assert.equal(ctx.saved().items.length,1);assert.equal(sessionStorage.getItem(ctx.key),null);
+ finishRefresh();await opening;await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(sessionStorage.getItem(ctx.key),null,'late connection refresh must not restore an already applied review');
+});
+
 test('failed persistence preserves the review and selection for retry',async t=>{
  const ctx=await setup(t);const before=structuredClone(ctx.host.decisionState);ctx.failSave(true);
  await ctx.open([job('retry-run',[proposal(ctx.work.id,'constraint')])]);
