@@ -113,7 +113,20 @@ test('hidden AGY help flags do not claim an outdated CLI; explicit response test
 });
 
 test('all CLI adapters accept separate questions, conflicts and handoff response schemas and account for usage',async()=>{
- const runner=make();try{await runner.status();for(const kind of ['questions','conflicts','handoff']){const jobs=['codex','claude','agy'].map(agent=>runner.create({agent,kind,prompt:'기획 검토',requestId:crypto.randomUUID()}));const done=await Promise.all(jobs.map(j=>completed(runner,j)));for(const job of done){assert.equal(job.status,'succeeded',job.error);assert.ok(job.usage);if(kind==='handoff')assert.equal(job.result.tasks[0].nodeId,'work-a');else assert.equal(job.result.items[0].question,'어떤 가격을 비교할까요?');}}}finally{await runner.close();}
+ const runner=make();try{await runner.status();for(const kind of ['questions','conflicts','handoff']){const jobs=['codex','claude','agy'].map(agent=>runner.create({agent,kind,prompt:'기획 검토',requestId:crypto.randomUUID()}));const done=await Promise.all(jobs.map(j=>completed(runner,j)));for(const job of done){assert.equal(job.status,'succeeded',job.error);assert.ok(job.usage);if(kind==='handoff')assert.equal(job.result.tasks[0].nodeId,'work-a');else{assert.equal(job.result.items[0].question,'어떤 가격을 비교할까요?');assert.equal(job.result.items[0].type,kind==='conflicts'?'conflict':'question');assert.equal(job.result.items[0].relatedIds.length,kind==='conflicts'?2:0);}}}}finally{await runner.close();}
+});
+
+test('fresh question responses normalize irrelevant decision links across all CLI adapters',async()=>{
+ const runner=make();try{
+  await runner.status();const jobs=['codex','claude','agy'].map(agent=>runner.create({agent,kind:'questions',prompt:'fixture:wrong-related-ids',requestId:crypto.randomUUID()}));
+  for(const job of await Promise.all(jobs.map(j=>completed(runner,j)))){
+   assert.equal(job.status,'succeeded',job.error);assert.equal(job.result.items[0].question,'어떤 가격을 비교할까요?');
+   assert.deepEqual(job.result.items[0].nodeIds,['work-a']);assert.deepEqual(job.result.items[0].relatedIds,[]);
+  }
+  const item={type:'question',nodeIds:['work-a'],relatedIds:[],question:'사용자 질문',reason:'',evidence:'',options:[],blocking:false};
+  assert.throws(()=>parseResponse('codex','',JSON.stringify({summary:'',items:[item]}),'conflicts'),/JSON/);
+  assert.throws(()=>parseResponse('codex','',JSON.stringify({summary:'',items:[{...item,type:'conflict',relatedIds:['decision-a','decision-b']}]}),'questions'),/JSON/);
+ }finally{await runner.close();}
 });
 
 

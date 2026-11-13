@@ -80,6 +80,26 @@ test('an initially unselected restored result can be selected and applied',async
  await ctx.apply();assert.equal(ctx.saved().items.length,1);
 });
 
+test('all three restored AI reviews apply when one ordinary question contains invalid decision links',async t=>{
+ const ctx=await setup(t);
+ const jobs=[job('valid-codex',[proposal(ctx.work.id)],'codex'),job('valid-claude',[proposal(ctx.work.id,'verification','계약 확인은?')],'claude'),job('bad-links-agy',[{...proposal(ctx.work.id,'constraint','예산 한도는?'),relatedIds:[ctx.work.id,'invented-decision']}],'agy')];
+ await ctx.open(jobs);document.querySelector('[data-dai="apply"]').click();
+ await until(()=>!document.querySelector('.agent-dialog')||document.querySelector('.agent-error')?.textContent);
+ assert.equal(document.querySelector('.agent-dialog'),null,document.querySelector('.agent-error')?.textContent);
+ assert.equal(ctx.saved().items.length,3);assert.deepEqual(ctx.saved().appliedRuns,jobs.map(j=>j.id));
+ assert.deepEqual(ctx.saved().items.at(-1).relatedIds,[]);assert.equal(ctx.saved().items.at(-1).question,'예산 한도는?');
+ assert.equal(sessionStorage.getItem(ctx.key),null);
+});
+
+test('a real invalid conflict identifies its AI response and can be excluded without losing the other reviews',async t=>{
+ const ctx=await setup(t);
+ await ctx.open([job('keep-codex',[proposal(ctx.work.id)],'codex'),job('keep-claude',[proposal(ctx.work.id,'constraint','예산은?')],'claude'),job('reject-agy',[{...proposal(ctx.work.id,'conflict','서로 충돌하나요?'),relatedIds:['missing-a','missing-b']}],'agy')]);
+ document.querySelector('[data-dai="apply"]').click();await until(()=>document.querySelector('.agent-error')?.textContent.includes('AGY 응답의 1번 항목'));
+ assert.equal(ctx.saved().items.length,0);assert.ok(sessionStorage.getItem(ctx.key));
+ document.querySelector('[data-dai-include="agy"]').click();await ctx.apply();
+ assert.equal(ctx.saved().items.length,2);assert.deepEqual(ctx.saved().appliedRuns,['keep-codex','keep-claude']);
+});
+
 test('completed results can be applied while refreshing agent connections is still pending',async t=>{
  const ctx=await setup(t),{runner}=await import('../public/agent-client.js?v=0.8.0');
  const originalRequest=runner.request,originalRefresh=runner.refresh;
@@ -115,7 +135,7 @@ test('in-dialog diagnostics identify a pending save without including project or
  const details=document.querySelector('.decision-diagnostics');details.open=true;
  details.dispatchEvent(new window.Event('toggle'));
  const text=document.querySelector('[data-dai-diagnostics]').value,report=JSON.parse(text);
- assert.equal(report.build,'decision-apply-diagnostics3');assert.equal(report.applyClicks,1);
+ assert.equal(report.build,'decision-review-links-fix4');assert.equal(report.applyClicks,1);
  assert.equal(report.applyPhase,'saving-plan');assert.equal(report.busy,true);assert.equal(report.host.saving,true);
  assert.deepEqual(report.jobs,[{agent:'codex',status:'succeeded',included:true,hasResult:true,items:1}]);
  for(const privateText of ['비공개 질문 내용',ctx.host.project.name,ctx.host.project.description,ctx.work.id,'pending-save-run'])assert.equal(text.includes(privateText),false);

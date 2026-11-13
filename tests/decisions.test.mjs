@@ -21,6 +21,60 @@ test('legacy plans migrate and one question keeps one answer with all AI sources
  const before=structuredClone(p);assert.throws(()=>applyDecisionReviews(p,[{id:'bad-run',agent:'agy',result:{summary:'',items:[question(['missing'])]}}],[a.id],'questions'),/검토하지 않은/);assert.deepEqual(p,before);
 });
 
+test('question reviews retain question, verification and constraint content despite irrelevant decision IDs',()=>{
+ let {p,a}=sample();p=changePlan(p,'기존 답변',x=>addDecision(x,question([a.id],{question:'이미 확정한 범위는?'})));
+ p=reply(p,p.items[0].id,'기존 확정 답변');const originalItem=structuredClone(p.items[0]);
+ const jobs=['question','verification','constraint'].map((type,index)=>({id:'related-run-'+index,agent:['codex','claude','agy'][index],result:{summary:'질문 검토',items:[question([a.id],{type,question:type+' 확인',relatedIds:[a.id,'invented-decision'],evidence:'AI 근거',options:[{label:'선택지',impact:'영향'}]})]}}));
+ const raw=structuredClone(jobs),next=applyDecisionReviews(p,jobs,[a.id],'questions');
+ assert.deepEqual(next.items[0],originalItem);assert.equal(next.items.length,4);
+ for(const [index,item] of next.items.slice(1).entries()){
+  const input=jobs[index].result.items[0];assert.equal(item.type,input.type);assert.equal(item.question,input.question);
+  assert.deepEqual(item.nodeIds,[a.id]);assert.deepEqual(item.relatedIds,[]);
+  assert.deepEqual(item.options,input.options);assert.equal(item.sources[0].evidence,'AI 근거');
+  assert.equal(item.status,item.type==='question'?'answer':'check');assert.equal(item.answer,'');
+ }
+ assert.deepEqual(jobs,raw,'normalization must not mutate the pending AI responses');
+ assert.deepEqual(next.appliedRuns,jobs.map(j=>j.id));assert.equal(next.questionCoverage.length,1);
+ assert.deepEqual(travelHistory(next,'undo').items,p.items);
+});
+
+test('irrelevant links do not split duplicate AI questions or replace confirmed user answers',()=>{
+ let {p,a}=sample();p=changePlan(p,'질문',x=>addDecision(x,question([a.id])));p=reply(p,p.items[0].id,'세금 포함');
+ const originalId=p.items[0].id;
+ const jobs=['codex','claude','agy'].map((agent,index)=>({id:'duplicate-related-'+index,agent,result:{summary:'',items:[question([a.id],{relatedIds:[a.id,'generated-'+index],evidence:'검토 근거 '+index})]}}));
+ const next=applyDecisionReviews(p,jobs,[a.id],'questions');
+ assert.equal(next.items.length,1);assert.equal(next.items[0].id,originalId);assert.equal(next.items[0].status,'done');
+ assert.equal(next.items[0].answer,'세금 포함');assert.equal(next.items[0].evidence,'사용자 결정');assert.equal(next.items[0].sources.length,3);
+});
+
+test('legacy ordinary questions with stored decision links keep their confirmed answer when reviewed again',()=>{
+ let {p,a,b}=sample();p=changePlan(p,'기존 질문',x=>{addDecision(x,question([b.id],{question:'기준 통화는?'}));addDecision(x,question([a.id]));});
+ p=reply(p,p.items[1].id,'기존에 확정한 가격');
+ p.items[1].relatedIds=[p.items[0].id];p=validatePlan(p);
+ const original=structuredClone(p.items[1]),next=applyDecisionReviews(p,[{id:'legacy-related-review',agent:'claude',result:{summary:'',items:[question([a.id],{relatedIds:[p.items[0].id]})]}}],[a.id],'questions');
+ assert.equal(next.items.length,2);assert.equal(next.items[1].id,original.id);assert.equal(next.items[1].answer,original.answer);
+ assert.equal(next.items[1].status,'done');assert.deepEqual(next.items[1].relatedIds,original.relatedIds);assert.equal(next.items[1].sources.length,1);
+});
+
+test('real conflict links remain required and invalid conflict batches leave the plan untouched',()=>{
+ let {p,a,b}=sample();p=changePlan(p,'질문',x=>{addDecision(x,question([a.id]));addDecision(x,question([b.id],{question:'세금 포함 여부는?'}));});
+ p=reply(p,p.items[0].id,'총액');p=reply(p,p.items[1].id,'세금 제외');
+ const ids=p.items.map(i=>i.id),before=structuredClone(p);
+ const conflict=question([a.id,b.id],{type:'conflict',relatedIds:ids,question:'가격 기준이 서로 다른가요?'});
+ for(const kind of ['questions','conflicts']){
+  const next=applyDecisionReviews(p,[{id:'valid-conflict-'+kind,agent:'claude',result:{summary:'',items:[conflict]}}],[a.id,b.id],kind);
+  assert.equal(next.items.at(-1).type,'conflict');assert.deepEqual(next.items.at(-1).relatedIds,ids);
+  for(const relatedIds of [[ids[0]],[ids[0],'missing-decision']]){
+   assert.throws(()=>applyDecisionReviews(p,[{id:'invalid-conflict',agent:'agy',result:{summary:'',items:[{...conflict,relatedIds}]}}],[a.id,b.id],kind));
+   assert.deepEqual(p,before);
+  }
+ }
+ const valid={id:'valid-question',agent:'codex',result:{summary:'',items:[question([a.id],{question:'새로운 질문'})]}};
+ const invalid={id:'bad-conflict',agent:'agy',result:{summary:'',items:[{...conflict,relatedIds:[ids[0],'missing-decision']}]}};
+ assert.throws(()=>applyDecisionReviews(p,[valid,invalid],[a.id,b.id],'questions'),/AGY.*1번 항목.*관련 결정/);
+ assert.deepEqual(p,before);
+});
+
 test('node edits invalidate answers and coverage; layout preserves them; deletion and organization reconcile atomically with undo',()=>{
  let {p,a,b}=sample();p=applyDecisionReviews(p,[{id:'review-a',agent:'codex',result:{summary:'',items:[question([a.id]),question([a.id,b.id],{question:'통화는?',blocking:false})]}}],[a.id,b.id],'questions');
  p=reply(p,p.items[0].id);p=reply(p,p.items[1].id,'KRW');
