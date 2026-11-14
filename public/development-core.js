@@ -20,7 +20,7 @@ const agent=(value,label)=>{ensure(DEVELOPMENT_AGENTS.includes(value),label+' AI
 const strategyId=value=>{ensure(strategyIds.has(value),'협업 방식을 확인해 주세요.');return value;};
 
 export function defaultDevelopment(){
- return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,maxParallel:3,developers:['codex','claude','agy'],taskMinutes:20,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
+ return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,maxParallel:3,developers:['codex','claude','agy'],taskMinutes:20,draftAttempts:3,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
 }
 function rolesFrom(raw,base){
  const result={...base};object(raw,'역할');
@@ -68,7 +68,8 @@ export function validateDevelopment(raw){
  const maxParallel=raw.maxParallel??3;ensure(Number.isInteger(maxParallel)&&maxParallel>=1&&maxParallel<=3,'병렬 작업 수는 1~3입니다.');
  const developers=[...new Set(array(raw.developers??Object.values(roles),3,'개발 참여 AI').map(value=>agent(value,'개발 참여')))];ensure(developers.length,'개발 참여 AI를 하나 이상 선택해 주세요.');
  const taskMinutes=raw.taskMinutes??20;ensure([0,5,10,20,40].includes(taskMinutes),'작업별 대기 한도를 확인해 주세요.');
- return {version:1,strategy,lead,roles,overrides,limits,autoSwitch:raw.autoSwitch===true,maxParallel,developers,taskMinutes,checks,launch:{kind,entry,command,url,prepare}};
+ const draftAttempts=raw.draftAttempts??3;ensure(Number.isInteger(draftAttempts)&&draftAttempts>=1&&draftAttempts<=3,'초안 통합 시도는 1~3회입니다.');
+ return {version:1,strategy,lead,roles,overrides,limits,draftAttempts,autoSwitch:raw.autoSwitch===true,maxParallel,developers,taskMinutes,checks,launch:{kind,entry,command,url,prepare}};
 }
 
 export function resolveRoles(config,strategy=config?.strategy??'integrated'){
@@ -112,7 +113,7 @@ export function planPartialRetry(tasks,{strategy,changedTaskIds=[]}={}){
   if(keptDisposition(task)){action='keep';reason=task.disposition==='accepted'?'사용자가 수용한 한계를 유지합니다.':'이번 범위에서 제외한 작업을 유지합니다.';}
   else if(task.status==='running'){action='wait';reason='실행 중인 요청을 완료하거나 취소한 뒤 재시도합니다.';}
   else if(task.status==='blocked'&&task.retryable!==true){action='wait';reason='기획·환경·자료 등 선행 조건을 해결한 뒤 재개합니다.';}
-  else if(findings.some(f=>f.type==='spec')){action='wait';reason='기획 변경이나 사용자 결정이 먼저 필요합니다.';}
+  else if(findings.some(f=>f.type==='spec')&&!findings.some(f=>f.type==='implementation')){action='wait';reason='기획 변경이나 사용자 결정이 먼저 필요합니다.';}
   else if(task.status==='limited'&&task.retryable!==true){action='analyze';reason='남은 한계의 원인과 수정 가능한 범위를 먼저 분석합니다.';}
   else if(task.status==='passed'){
    const needsEvidence=['integrated','verification'].includes(strategy)&&!(task.verifiedStrategies??[]).includes(strategy)&&task.strategy!==strategy;
@@ -148,6 +149,6 @@ export function rotateRoles(config,{strategy=config?.strategy??'integrated',auth
 // A verified contract can be usable before full acceptance. A SHA alone is not readiness.
 export function dependencyReady(task){
  if(!task||task.disposition==='excluded'||task.dependencyIssues?.length)return false;
- if((task.findings||[]).some(f=>f.status==='open'&&(f.type==='spec'||f.severity==='critical'||f.type==='implementation'&&f.severity==='high')))return false;
+ if((task.findings||[]).some(f=>f.status==='open'&&(f.severity==='critical'||f.type==='implementation'&&f.severity==='high')))return false;
  return task.status==='passed'||(task.readiness?.ready===true&&task.readiness.codeSha===task.artifactSha&&!!task.readiness.evidence);
 }

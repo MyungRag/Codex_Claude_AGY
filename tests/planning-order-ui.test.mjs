@@ -6,7 +6,7 @@ import {createPlan,addNode,validatePlan,removeNode} from '../public/planning-mod
 test('planning execution view distinguishes hierarchy, precedence, editable steps and deleted prerequisites',async t=>{
  const {window}=new JSDOM('<main id="planning-root"></main>',{url:'http://127.0.0.1:4173'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
- const {mountPlanner}=await import('../public/planning.js?v=0.11.0');
+ const {mountPlanner}=await import('../public/planning.js?v=0.12.0');
  const project={id:'order-ui',name:'구현 순서 확인',description:'계층과 구현 순서',instructions:''};
  const plan=createPlan(project),group=addNode(plan,plan.rootId,{title:'계산 기능',nodeType:'group'});
  const consumer=addNode(plan,group.id,{title:'철근량·연성 규정 검토',order:1,criteria:'규정 만족',dependencyState:'defined'});

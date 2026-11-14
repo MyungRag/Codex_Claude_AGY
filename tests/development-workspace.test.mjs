@@ -119,3 +119,8 @@ test('Windows npm resolves JS entry directly without a shell shim',async t=>{
  assert.deepEqual(await resolveDevelopmentCommand('npm',{platform:'win32',execPath:path.join(bin,'node.exe'),env:{PATH:bin}}),{command:path.join(bin,'node.exe'),prefix:[npm]});
  await assert.rejects(resolveDevelopmentCommand('npm.cmd'),/실행 파일/);await assert.rejects(resolveDevelopmentCommand('node; echo unsafe'),/실행 파일/);await assert.rejects(resolveDevelopmentCommand('powershell'),/실행 파일/);
 });
+
+test('automatic checks execute all test files, including integration tests alongside the generated unit suite',async t=>{
+ const f=await fixture(t),w=await f.create();await f.workspace.apply(w,[{path:'agent-desk.test.mjs',action:'write',content:"import {test} from 'node:test';test('unit',()=>{});"},{path:'integration.test.mjs',action:'write',content:"import {test} from 'node:test';import assert from 'node:assert/strict';test('integration',()=>assert.fail('integration really ran'));"}]);await f.workspace.commit(w);
+ const checks=await f.workspace.automaticChecks(w,{kind:'static',entry:'index.html'});assert.ok(checks.some(c=>!c.passed&&c.output.includes('integration really ran')));
+});

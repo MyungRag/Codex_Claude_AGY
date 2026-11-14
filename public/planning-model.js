@@ -1,9 +1,9 @@
-import {intakeState} from './planning-intake-core.js?v=0.11.0';
-import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.11.0';
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.11.0';
+import {intakeState} from './planning-intake-core.js?v=0.12.0';
+import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.12.0';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.12.0';
 // Serializable graph operations. No agent calls or filesystem access occur here.
 export const AGENTS = [{id:'codex',name:'Codex',short:'C'},{id:'claude',name:'Claude',short:'✳'},{id:'agy',name:'AGY',short:'A'}];
-export const NODE_WIDTH=236, NODE_HEIGHT=204;
+export const NODE_WIDTH=236, NODE_HEIGHT=286;
 const uid=()=>crypto.randomUUID();
 const clone=value=>structuredClone(value);
 const norm=value=>value.normalize('NFKC').trim().replace(/\s+/g,' ').toLocaleLowerCase();
@@ -90,6 +90,7 @@ export function addNode(plan,parentId,input,betweenId=null){
 }
 export function editNode(plan,nodeId,input){
   const node=plan.nodes.find(n=>n.id===nodeId);check(node,'노드가 없습니다.');
+  if(Array.isArray(input.integrationWith)&&!input.integrationWith.length)delete node.integrationWith;
   Object.assign(node,fields(input),normalizeExecutionMeta({...node,...input}),{status:input.status||'draft'});
 }
 export function removeNode(plan,nodeId,cascade=false){
@@ -100,6 +101,7 @@ export function removeNode(plan,nodeId,cascade=false){
   const parents=plan.edges.filter(e=>e.to===nodeId).map(e=>e.from), children=childrenOf(plan,nodeId);
   plan.nodes=plan.nodes.filter(n=>!removed.has(n.id));
   for(const node of plan.nodes){
+    if(node.integrationWith)node.integrationWith=node.integrationWith.filter(id=>!removed.has(id));
     const missing=(node.dependsOn??[]).filter(id=>removed.has(id));
     if(missing.length){node.dependsOn=node.dependsOn.filter(id=>!removed.has(id));node.dependencyState='unreviewed';node.dependencyIssues=[...new Set([...(node.dependencyIssues??[]),...missing.map(id=>`삭제된 선행 작업: ${removedTitles.get(id)} [${id}]. 대체 작업과 의존성을 다시 확인해 주세요.`)])];}
   }
@@ -119,7 +121,7 @@ export function mergeFields(plan,ids){
   const nodes=plan.nodes.filter(n=>ids.includes(n.id)),meta=nodes.map(normalizeExecutionMeta),orders=meta.map(n=>n.order).filter(n=>n!==null);
   return {title:nodes[0]?.title||'',description:joinContent(nodes,'description'),instructions:joinContent(nodes,'instructions'),criteria:joinContent(nodes,'criteria'),
     nodeType:meta.length&&meta.every(n=>n.nodeType==='group')?'group':'task',order:orders.length?Math.min(...orders):null,
-    dependsOn:[...new Set(meta.flatMap(n=>n.dependsOn))].filter(id=>!ids.includes(id)),functionSteps:[...new Set(meta.flatMap(n=>n.functionSteps))],
+    integrationWith:[...new Set(meta.flatMap(n=>n.integrationWith||[]))].filter(id=>!ids.includes(id)),dependsOn:[...new Set(meta.flatMap(n=>n.dependsOn))].filter(id=>!ids.includes(id)),functionSteps:[...new Set(meta.flatMap(n=>n.functionSteps))],
     dependencyState:meta.every(n=>n.dependencyState==='defined')?'defined':'unreviewed',dependencyIssues:[...new Set(meta.flatMap(n=>n.dependencyIssues))]};
 }
 export function mergeNodes(plan,ids,input){
@@ -130,7 +132,7 @@ export function mergeNodes(plan,ids,input){
   const merged=mergeFields(plan,ids);
   editNode(plan,kept,{...merged,...input,dependsOn:[...new Set([...merged.dependsOn,...(input.dependsOn??[])])].filter(id=>!ids.includes(id)),status:'draft'});
   plan.nodes=plan.nodes.filter(n=>!removed.has(n.id));
-  for(const node of plan.nodes)node.dependsOn=[...new Set((node.dependsOn??[]).map(id=>removed.has(id)?kept:id))].filter(id=>id!==node.id);
+  for(const node of plan.nodes){if(node.integrationWith)node.integrationWith=[...new Set(node.integrationWith.map(id=>removed.has(id)?kept:id))].filter(id=>id!==node.id);node.dependsOn=[...new Set((node.dependsOn??[]).map(id=>removed.has(id)?kept:id))].filter(id=>id!==node.id);}
   plan.edges=uniqueEdges(plan.edges.map(e=>({from:removed.has(e.from)?kept:e.from,to:removed.has(e.to)?kept:e.to})));
   plan.proposals=plan.proposals.map(p=>removed.has(p.nodeId)?{...p,nodeId:kept}:p);
   const title=plan.nodes.find(n=>n.id===kept).title;

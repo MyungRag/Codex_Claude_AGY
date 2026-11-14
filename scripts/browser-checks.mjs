@@ -36,9 +36,10 @@ export async function browserChecks(url,checks,{signal}={}){
   signal?.addEventListener('abort',abort,{once:true});child.stdio[3].on('error',failAll);
   child.stdio[4].on('data',chunk=>{buffer+=chunk.toString();if(buffer.length>2000000){failAll(new Error('브라우저 검사 응답이 너무 큽니다.'));child.kill();return;}let index;while((index=buffer.indexOf('\0'))>=0){const raw=buffer.slice(0,index);buffer=buffer.slice(index+1);let message;try{message=JSON.parse(raw);}catch{continue;}const eventKey=message.sessionId+':'+message.method,event=events.get(eventKey);if(event){events.delete(eventKey);clearTimeout(event.timer);event.resolve(message.params);}if(message.method==='Runtime.exceptionThrown')runtimeErrors.push(message.params.exceptionDetails.text||'JavaScript exception');const pending=requests.get(message.id);if(pending){clearTimeout(pending.timer);requests.delete(message.id);message.error?pending.reject(new Error(message.error.message)):pending.resolve(message.result);}}});
   for(const check of checks){
-   const startErrors=runtimeErrors.length;let targetId;
+   const startErrors=runtimeErrors.length;let targetId,browserContextId;
    try{
-    ({targetId}=await command('Target.createTarget',{url:'about:blank'}));const {sessionId}=await command('Target.attachToTarget',{targetId,flatten:true});
+    ({browserContextId}=await command('Target.createBrowserContext',{disposeOnDetach:true}));
+    ({targetId}=await command('Target.createTarget',{url:'about:blank',browserContextId}));const {sessionId}=await command('Target.attachToTarget',{targetId,flatten:true});
     await command('Runtime.enable',{},sessionId);await command('Page.enable',{},sessionId);await Promise.all([waitEvent(sessionId,'Page.loadEventFired'),command('Page.navigate',{url},sessionId)]);
     const expression=`(async()=>{const check=${JSON.stringify(check)};const wait=ms=>new Promise(r=>setTimeout(r,ms));for(let i=0;i<100&&document.readyState!=='complete';i++)await wait(50);const find=async selector=>{for(let i=0;i<40;i++){const el=document.querySelector(selector);if(el)return el;await wait(50);}throw new Error('요소 없음: '+selector);};for(const step of check.steps){const el=await find(step.selector);if(step.action==='click')el.click();else{el.value=step.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}await wait(25);}for(const expected of check.expect){const el=await find(expected.selector);let actual;for(let i=0;i<40;i++){actual=String('value' in el?el.value:el.textContent).trim();if(expected.mode==='equals'?actual===expected.text:actual.includes(expected.text))break;await wait(50);}if(!(expected.mode==='equals'?actual===expected.text:actual.includes(expected.text)))throw new Error(expected.selector+' 예상: '+expected.text+' / 실제: '+actual);}return '브라우저에서 입력·결과 확인 완료';})()`;
     const evaluated=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId);
@@ -46,7 +47,7 @@ export async function browserChecks(url,checks,{signal}={}){
     if(runtimeErrors.length>startErrors)throw new Error('페이지 JavaScript 오류: '+runtimeErrors.slice(startErrors).join('; '));
     results.push({label:check.name,passed:true,exitCode:0,output:evaluated.result.value});
    }catch(error){if(signal?.aborted)throw error;results.push({label:check.name,passed:false,exitCode:error.unavailable?null:1,failureKind:error.unavailable?'environment':'assertion',output:error.message});}
-   finally{if(targetId&&!failure)await command('Target.closeTarget',{targetId}).catch(()=>{});}
+   finally{if(targetId&&!failure)await command('Target.closeTarget',{targetId}).catch(()=>{});if(browserContextId&&!failure)await command('Target.disposeBrowserContext',{browserContextId}).catch(()=>{});}
   }
   return results;
  }finally{

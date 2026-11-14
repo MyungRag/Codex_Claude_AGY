@@ -12,9 +12,11 @@ export function normalizeExecutionMeta(input={}){
   ensure(['unreviewed','defined'].includes(dependencyState),'선행 작업 검토 상태가 올바르지 않습니다.');
   const dependsOn=strings(input.dependsOn??[],99,80,'선행 작업');
   ensure(dependsOn.every(validId)&&new Set(dependsOn).size===dependsOn.length,'선행 작업 ID가 중복되거나 올바르지 않습니다.');
+  const integrationWith=strings(input.integrationWith??[],99,80,'병렬 개발 후 연결할 작업');
+  ensure(integrationWith.every(validId)&&new Set(integrationWith).size===integrationWith.length,'통합 작업 ID가 중복되거나 올바르지 않습니다.');
   const functionSteps=strings(input.functionSteps??[],20,600,'함수 구현 단계');
   const dependencyIssues=[...new Set(strings(input.dependencyIssues??[],99,300,'선행 작업 확인 사항'))];
-  return {nodeType,order,dependsOn,functionSteps,dependencyState:dependencyIssues.length?'unreviewed':dependencyState,dependencyIssues};
+  return {nodeType,order,dependsOn,...(Object.hasOwn(input,'integrationWith')?{integrationWith}:{}),functionSteps,dependencyState:dependencyIssues.length?'unreviewed':dependencyState,dependencyIssues};
 }
 function graph(nodes,{rootId}={}){
   ensure(Array.isArray(nodes),'실행할 노드 목록이 올바르지 않습니다.');
@@ -24,6 +26,7 @@ function graph(nodes,{rootId}={}){
   for(const {node,meta} of entries){
     ensure(meta.nodeType!=='group'||meta.dependsOn.length===0,'묶음 노드는 선행 작업을 가질 수 없습니다. 실제 작업 노드에 지정해 주세요.');
     ensure(node.id!==rootId||meta.dependsOn.length===0,'전체 목표에는 선행 작업을 지정할 수 없습니다.');
+    for(const peer of meta.integrationWith||[])ensure(peer!==node.id&&byId.has(peer)&&peer!==rootId&&byId.get(peer).meta.nodeType!=='group'&&meta.nodeType!=='group','통합 대상은 다른 실제 작업 노드여야 합니다.');
     for(const predecessor of meta.dependsOn){
       ensure(predecessor!==node.id,'자기 자신을 선행 작업으로 지정할 수 없습니다.');
       ensure(byId.has(predecessor),'선행 작업이 삭제되었거나 존재하지 않습니다.');

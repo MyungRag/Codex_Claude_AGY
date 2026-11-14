@@ -37,3 +37,12 @@ test('explicit default edits and existing user answers are preserved',()=>{
 test('repeated identical planning does not accumulate nodes, defaults, or future candidates',()=>{
  const p=applyIntake(createPlan(project),draft(),options),again=applyIntake(p,draft(),{...options,id:'another-run'});assert.equal(again.nodes.length,p.nodes.length);assert.equal(again.items.length,p.items.length);assert.equal(again.backlog.length,p.backlog.length);assert.equal(again.proposals.length,p.proposals.length);
 });
+
+test('parallel integration contracts survive ID remapping, persistence and finalized assignments without becoming hard prerequisites',()=>{
+ const d=draft();d.nodes.push({...node('screen','core'),integrationWith:['engine']});d.nodes[1].integrationWith=['screen'];const p=applyIntake(createPlan(project),d,options),engine=p.nodes.find(n=>n.title==='engine'),screen=p.nodes.find(n=>n.title==='screen');assert.deepEqual(engine.integrationWith,[screen.id]);assert.deepEqual(screen.integrationWith,[engine.id]);assert.deepEqual(engine.dependsOn,[]);assert.deepEqual(validatePlan(JSON.parse(JSON.stringify(p))),p);
+ const base=finalizePlan(project,p).baselines.at(-1);assert.deepEqual(createAssignments(base).find(t=>t.nodeId===engine.id).integrationWith,[screen.id]);const invalid=draft();invalid.nodes[1].integrationWith=['missing'];assert.throws(()=>validateIntake(createPlan(project),invalid),/통합|노드|작업/);
+});
+
+test('explicitly cleared integration peers stay cleared through handoff validation',async()=>{
+ const {saveAssignments}=await import('../public/decision-model.js');const d=draft();d.nodes.push({...node('screen','core'),integrationWith:['engine']});let p=finalizePlan(project,applyIntake(createPlan(project),d,options));const base=p.baselines.at(-1),tasks=createAssignments(base),screen=tasks.find(t=>t.integrationWith?.length);screen.integrationWith=[];p=saveAssignments(p,base.id,tasks);const saved=validatePlan(JSON.parse(JSON.stringify(p)));assert.deepEqual(saved.handoffs[0].tasks.find(t=>t.nodeId===screen.nodeId).integrationWith,[]);
+});

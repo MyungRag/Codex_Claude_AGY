@@ -1,4 +1,4 @@
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.11.0';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.12.0';
 // Shared, bounded records for questions, immutable baselines and handoff drafts.
 export const decisionTypes={question:'사용자 결정',verification:'추가 확인',constraint:'제약 사항',conflict:'결정 충돌'};
 export const decisionStatuses={answer:'답변 필요',check:'확인 필요',done:'결정 완료'};
@@ -34,9 +34,9 @@ export function validateItems(raw,nodes){
 }
 // Omit all-default metadata in canonical snapshots so older saved baselines and
 // question fingerprints remain current after the additive migration.
-const semanticExecutionMeta=n=>{const meta=normalizeExecutionMeta(n);return meta.nodeType==='task'&&meta.order===null&&!meta.dependsOn.length&&!meta.functionSteps.length&&meta.dependencyState==='unreviewed'&&!meta.dependencyIssues.length?{}:meta;};
+const semanticExecutionMeta=n=>{const meta=normalizeExecutionMeta(n);if(!meta.integrationWith?.length)delete meta.integrationWith;return meta.nodeType==='task'&&meta.order===null&&!meta.dependsOn.length&&!meta.integrationWith?.length&&!meta.functionSteps.length&&meta.dependencyState==='unreviewed'&&!meta.dependencyIssues.length?{}:meta;};
 export const semanticNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria,...semanticExecutionMeta(n)});
-const questionNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria,nodeType:n.nodeType||'task',functionSteps:n.functionSteps||[],dependsOn:[...(n.dependsOn||[])].sort()});
+const questionNode=n=>({id:n.id,title:n.title,description:n.description,instructions:n.instructions,criteria:n.criteria,nodeType:n.nodeType||'task',functionSteps:n.functionSteps||[],dependsOn:[...(n.dependsOn||[])].sort(),...(n.integrationWith?.length?{integrationWith:[...n.integrationWith].sort()}: {})});
 export const nodeFingerprint=(plan,id)=>JSON.stringify({node:questionNode(plan.nodes.find(n=>n.id===id))});
 export function normalizeQuestionFingerprint(value){try{return JSON.stringify({node:questionNode(JSON.parse(value).node)});}catch{return value;}}
 export const changedQuestionNodes=(plan,nodeIds=plan.nodes.map(n=>n.id))=>nodeIds.filter(id=>plan.nodes.some(n=>n.id===id)&&!plan.questionCoverage.some(c=>c.nodeId===id&&normalizeQuestionFingerprint(c.fingerprint)===nodeFingerprint(plan,id)));
@@ -53,7 +53,7 @@ function validateSnapshot(s){
 }
 export function validateTasks(raw,snapshot){
  const nodes=snapshot.nodes.filter(n=>n.id!==snapshot.rootId&&n.nodeType!=='group'),valid=new Set(nodes.map(n=>n.id));
- const tasks=array(raw,nodes.length,'업무 분담').map(t=>{ensure(valid.has(t.nodeId)&&agents.includes(t.agent),'업무 담당과 노드를 확인해 주세요.');const node=nodes.find(n=>n.id===t.nodeId),meta=normalizeExecutionMeta({...node,...t,nodeType:'task'}),dependsOn=ids(meta.dependsOn);ensure(dependsOn.every(id=>valid.has(id)&&id!==t.nodeId),'선행 작업을 확인해 주세요.');return {nodeId:t.nodeId,agent:t.agent,...meta,dependsOn,instructions:text(t.instructions??'',6000,'업무 지시'),deliverable:text(t.deliverable??'',3000,'기대 결과'),criteria:text(t.criteria??'',3000,'완료 기준')};});
+ const tasks=array(raw,nodes.length,'업무 분담').map(t=>{ensure(valid.has(t.nodeId)&&agents.includes(t.agent),'업무 담당과 노드를 확인해 주세요.');const node=nodes.find(n=>n.id===t.nodeId),meta=normalizeExecutionMeta({...node,...t,nodeType:'task'}),dependsOn=ids(meta.dependsOn);ensure([...dependsOn,...(meta.integrationWith||[])].every(id=>valid.has(id)&&id!==t.nodeId),'선행 작업과 통합 대상을 확인해 주세요.');return {nodeId:t.nodeId,agent:t.agent,...meta,dependsOn,instructions:text(t.instructions??'',6000,'업무 지시'),deliverable:text(t.deliverable??'',3000,'기대 결과'),criteria:text(t.criteria??'',3000,'완료 기준')};});
  ensure(tasks.every(t=>t.instructions&&t.deliverable&&t.criteria),'업무 지시·기대 결과·완료 기준을 모두 입력해 주세요.');
  ensure(tasks.length===nodes.length&&new Set(tasks.map(t=>t.nodeId)).size===nodes.length,'모든 작업 노드에 담당자가 한 번씩 지정되어야 합니다.');
  const visiting=new Set(),done=new Set();const visit=id=>{ensure(!visiting.has(id),'선행 작업이 순환합니다.');if(done.has(id))return;visiting.add(id);for(const other of tasks.find(t=>t.nodeId===id).dependsOn)visit(other);visiting.delete(id);done.add(id);};for(const t of tasks)visit(t.nodeId);

@@ -1,6 +1,6 @@
-import {changePlan,AGENTS} from './planning-model.js?v=0.11.0';
-import {normalizeExecutionMeta,executionOrder} from './execution-order.js?v=0.11.0';
-import {ensure,text,recordId,array,decisionSnapshot,snapshotKey,nodeFingerprint,questionKey,validateTasks,recommendation} from './decision-core.js?v=0.11.0';
+import {changePlan,AGENTS} from './planning-model.js?v=0.12.0';
+import {normalizeExecutionMeta,executionOrder} from './execution-order.js?v=0.12.0';
+import {ensure,text,recordId,array,decisionSnapshot,snapshotKey,nodeFingerprint,questionKey,validateTasks,recommendation} from './decision-core.js?v=0.12.0';
 const now=()=>new Date().toISOString(),uid=()=>crypto.randomUUID();
 export function parseDecisionProposal(raw,{maxItems=60}={}){
  ensure(raw&&typeof raw==='object','AI 질문 응답을 확인해 주세요.');return {summary:text(raw.summary,6000,'검토 설명'),items:array(raw.items,maxItems,'AI 질문').map(i=>{
@@ -58,7 +58,7 @@ export function finalizePlan(project,plan,note=''){
  return changePlan(plan,'기획 확정',p=>{for(const item of p.items)if(!item.answer&&!item.deferred&&item.type!=='conflict'&&item.recommendation?.kind==='assumption'){const r=item.recommendation;updateDecision(p,item.id,{answer:r.answer,evidence:r.reason},'confirm');item.resolution={kind:'assumption',agent:'',reason:r.reason,messageIds:[],at:now()};}p.baselines.push({id:uid(),number:(p.baselines.at(-1)?.number||0)+1,at:now(),note:text(note,3000,'확정 메모'),snapshot:decisionSnapshot(project,p)});p.baselines=p.baselines.slice(-10);p.handoffs=p.handoffs.filter(h=>p.baselines.some(b=>b.id===h.baselineId));});
 }
 export function createAssignments(baseline){return executionOrder(baseline.snapshot.nodes.filter(n=>n.id!==baseline.snapshot.rootId&&n.nodeType!=='group')).map((n,index)=>({nodeId:n.id,agent:['codex','claude','agy'][index%3],...normalizeExecutionMeta(n),instructions:n.instructions||n.description||n.title+' 작업을 완료 기준에 맞게 구현하고 검증하세요.',criteria:n.criteria,deliverable:n.title+' 구현 결과와 검증 결과'}));}
-export function parseHandoff(raw){ensure(raw&&typeof raw==='object','업무 분담 응답을 확인해 주세요.');return {summary:text(raw.summary,6000,'분담 설명'),tasks:array(raw.tasks,99,'분담 작업').map(t=>({nodeId:recordId(t.nodeId),agent:text(t.agent,20,'담당'),dependsOn:array(t.dependsOn??[],99,'선행 작업').map(recordId),instructions:text(t.instructions??'',6000,'지시'),deliverable:text(t.deliverable??'',3000,'결과'),criteria:text(t.criteria??'',3000,'기준')}))};}
+export function parseHandoff(raw){ensure(raw&&typeof raw==='object','업무 분담 응답을 확인해 주세요.');return {summary:text(raw.summary,6000,'분담 설명'),tasks:array(raw.tasks,99,'분담 작업').map(t=>({nodeId:recordId(t.nodeId),agent:text(t.agent,20,'담당'),dependsOn:array(t.dependsOn??[],99,'선행 작업').map(recordId),...(t.integrationWith?{integrationWith:array(t.integrationWith,99,'통합 대상').map(recordId)}:{}),instructions:text(t.instructions??'',6000,'지시'),deliverable:text(t.deliverable??'',3000,'결과'),criteria:text(t.criteria??'',3000,'기준')}))};}
 export function saveAssignments(plan,baselineId,tasks,source='직접 편집'){
  const baseline=plan.baselines.find(b=>b.id===baselineId);ensure(baseline,'확정 기획이 없습니다.');const checked=validateTasks(tasks,baseline.snapshot);
  return changePlan(plan,'업무 분담안 저장',p=>{p.handoffs=p.handoffs.filter(h=>h.baselineId!==baselineId);p.handoffs.push({baselineId,tasks:checked,updatedAt:now(),source});});

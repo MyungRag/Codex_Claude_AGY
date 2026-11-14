@@ -1,7 +1,8 @@
-import {jobActivityState} from './progress-model.js?v=0.11.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.11.0';
-import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.11.0';
-import {decisionTypes} from './decision-core.js?v=0.11.0';
+import {agentCardsHTML} from './execution-monitor.js?v=0.12.0';
+import {jobActivityState} from './progress-model.js?v=0.12.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.12.0';
+import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.12.0';
+import {decisionTypes} from './decision-core.js?v=0.12.0';
 
 const label=id=>AGENT_INFO.find(a=>a.id===id)?.name||id;
 const live=job=>job&&['running','unknown'].includes(job.status);
@@ -58,7 +59,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
    <p class="agent-error" role="status" tabindex="-1">${esc(error||pending.merge?.validationError||pending.merge?.error||'')}</p>
    ${hasJobs?`
     ${working?leadControls():''}
-    <section data-job-activity aria-label="현재 AI 진행 상태">${activityJobs().map(jobActivityHTML).join('')}</section>
+    <section data-job-activity aria-label="현재 AI 진행 상태">${agentCardsHTML({calls:[...pending.jobs,pending.merge].filter(Boolean),agents:pending.participants||[...new Set(pending.jobs.map(j=>j.agent))],taskName:()=>project.name})}${activityJobs().map(jobActivityHTML).join('')}</section>
     <div class="review-actions">${!working&&!ready()?mergeButton():''}${active()?'<button class="button" data-lr="monitor">AI 실행 확인으로 이동 · 백그라운드 계속</button><button class="button" data-lr="cancel">요청 취소</button>':''}${allJobs().some(j=>j.status==='unknown')?`<button class="button" data-lr="recover" ${busy?'disabled':''}>상태 다시 확인</button>`:''}</div>
     ${ready()?finalPreview():''}
     ${!working?`<details data-review-adjust><summary>추가 요구·주 AI 변경 · 필요할 때만</summary>${leadControls()}${ready()?mergeButton():''}</details>`:''}
@@ -70,7 +71,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
   for(const key of opened){const panel=el.querySelector('['+key+']');if(panel)panel.open=true;}
  };
  const poll=async job=>{try{await runner.pollPending(job,()=>{job.lastCheckedAt=new Date().toISOString();render();},{refreshInBackground:true});}catch(e){job.status=e.status===404?'failed':'unknown';job.error=e.message;}save();render();};
- const start=async(job,content,jobKind)=>{job.context={projectId:project.id,...(pending.nodeIds.length===1?{taskId:pending.nodeIds[0]}:{})};job.requestedAt||=new Date().toISOString();try{if(!runner.runnerInfo)await runner.refresh();await runner.startPending(job,content,jobKind,pending.settings[job.agent]);job.lastCheckedAt=new Date().toISOString();save();render();if(job.id&&job.status==='running')await poll(job);}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;job.errorCode=e.code;}save();render();};
+ const start=async(job,content,jobKind)=>{job.kind=jobKind;job.context={projectId:project.id,...(pending.nodeIds.length===1?{taskId:pending.nodeIds[0]}:{})};job.requestedAt||=new Date().toISOString();try{if(!runner.runnerInfo)await runner.refresh();await runner.startPending(job,content,jobKind,pending.settings[job.agent]);job.lastCheckedAt=new Date().toISOString();save();render();if(job.id&&job.status==='running')await poll(job);}catch(e){job.status=e.jobMayExist?'unknown':'failed';job.error=e.message;job.errorCode=e.code;}save();render();};
  const merge=async()=>{
   if(cancelled||active()||!selected().length)return;
   if(plan.changeNumber!==pending.baseChange)throw new Error('기획이 변경되었습니다. 현재 기획으로 새 검토를 요청해 주세요.');
@@ -118,7 +119,7 @@ export async function openLeadReview({project,plan,kind,nodeIds,prompt,synthesiz
  });
  document.body.append(el);render();el.showModal();
  // Update only the read-only status panel. Never replace input fields or buttons on timer ticks.
- heartbeat=window.setInterval(()=>{if(!el.isConnected){window.clearInterval(heartbeat);return;}const panel=el.querySelector('[data-job-activity]');if(panel)panel.innerHTML=activityJobs().map(jobActivityHTML).join('');const summary=el.querySelector('[data-review-progress] strong');if(summary&&summary.textContent!==reviewProgress())summary.textContent=reviewProgress();},1000);
+ heartbeat=window.setInterval(()=>{if(!el.isConnected){window.clearInterval(heartbeat);return;}const panel=el.querySelector('[data-job-activity]');if(panel)panel.innerHTML=agentCardsHTML({calls:[...pending.jobs,pending.merge].filter(Boolean),agents:pending.participants||[...new Set(pending.jobs.map(j=>j.agent))],taskName:()=>project.name})+activityJobs().map(jobActivityHTML).join('');const summary=el.querySelector('[data-review-progress] strong');if(summary&&summary.textContent!==reviewProgress())summary.textContent=reviewProgress();},1000);
  // Do not refresh CLI availability on a restored completed result; it can be saved immediately.
  if(continuing)await run(async()=>{await continuing.done;});
  else if(pending.jobs.length){await run(async()=>{for(const job of allJobs().filter(j=>live(j)&&!j.id)){try{await runner.cancelPending(job);}catch(e){job.status='unknown';job.error=e.message;}}await Promise.all(allJobs().filter(j=>j.id&&live(j)).map(poll));await continueAutomatically();if(pending.merge?.status==='succeeded')await validateCompleted();});}

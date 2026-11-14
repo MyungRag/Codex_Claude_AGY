@@ -1,8 +1,8 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.11.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.11.0';
-import {modelControls,readModelControls,syncModelControl,jobMetadataHTML,esc} from './model-controls.js?v=0.11.0';
-import {organizePlan,normalizeOrganization,validateOrganization,organizationPrompt,organizationSynthesisPrompt,organizationRepairPrompt} from './organize-model.js?v=0.11.0';
-import {openConnections} from './agent-ui.js?v=0.11.0';
+import {openLeadReview} from './lead-review-ui.js?v=0.12.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.12.0';
+import {modelControls,readModelControls,syncModelControl,jobMetadataHTML,esc} from './model-controls.js?v=0.12.0';
+import {organizePlan,normalizeOrganization,validateOrganization,organizationPrompt,organizationSynthesisPrompt,organizationRepairPrompt} from './organize-model.js?v=0.12.0';
+import {openConnections} from './agent-ui.js?v=0.12.0';
 export function organizationExecutionHTML(node,nodes){
  const name=id=>nodes.find(n=>n.id===id)?.title||id;
  const dependencies=(node.dependsOn||[]).map(id=>esc(name(id))).join(' · ');

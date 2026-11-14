@@ -48,3 +48,9 @@ test('automatic browser checks detect a broken result instead of equating a load
  assert.ok(checks.some(c=>c.command==='browser'&&!c.passed));assert.ok(checks.every(c=>c.codeSha===sha));assert.ok(checks.filter(c=>c.command==='node').every(c=>c.passed),'core tests pass but the real UI is broken');
  assert.throws(()=>parseBrowserChecks({checks:[{name:'bad',steps:[{action:'evaluate',selector:'body',value:'alert(1)'}],expect:[{selector:'body',text:'',mode:'equals'}]}]}),/지원하지/);
 });
+
+test('browser cases have independent local storage and cookies even within one suite',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'browser-isolation-')),source=path.join(root,'source');await mkdir(source);const workspace=new DevelopmentWorkspace({dataRoot:path.join(root,'data')});const w=await workspace.create({projectId:'isolation',sourcePath:source,attemptId:'a'});
+ await workspace.apply(w,[{path:'index.html',action:'write',content:`<output id="state"></output><button id="change">Change</button><script>const show=()=>document.querySelector('#state').textContent=(localStorage.getItem('value')||'0')+':'+(document.cookie.includes('value=1')?'1':'0');show();document.querySelector('#change').onclick=()=>{localStorage.setItem('value','1');document.cookie='value=1';show();};</script>`}]);await workspace.commit(w);const launch=await workspace.launch(w.path,{kind:'static',entry:'index.html'});t.after(async()=>{await launch.stop();await rm(root,{recursive:true,force:true});});
+ const results=await browserChecks(launch.url,parseBrowserChecks({checks:[{name:'mutate state',steps:[{action:'click',selector:'#change'}],expect:[{selector:'#state',text:'1:1',mode:'equals'}]},{name:'fresh state',steps:[],expect:[{selector:'#state',text:'0:0',mode:'equals'}]}]}));assert.equal(results.length,2);assert.ok(results.every(c=>c.passed),JSON.stringify(results));
+});

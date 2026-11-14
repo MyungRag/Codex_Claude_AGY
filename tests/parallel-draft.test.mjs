@@ -118,3 +118,43 @@ test('deferring final verification preserves the reason and still attempts final
  await runtime.start(input);const deadline=Date.now()+5000;while(!finalWaiting&&Date.now()<deadline)await delay(5);assert.ok(finalWaiting);await runtime.defer('parallel',{taskId:'one'});await runtime.runs.get('parallel')?.done;
  const state=await runtime.get('parallel');assert.equal(state.status,'completed');assert.match(state.tasks.find(t=>t.id==='one').error,/사용자가 이 작업만 보류/);assert.ok(state.tasks.some(t=>t.isAssembly));assert.ok(state.latestRunnableId);
 });
+
+test('deep sibling components with integration contracts build concurrently before either finishes',async t=>{
+ let release;const gate=new Promise(r=>{release=r;});t.after(()=>release());
+ const {runtime,agents,input}=await setup(t,{ids:['one','two'],handler:async(request,payload)=>{if(request.kind==='development-build'){await gate;return build(payload.task.id);}return request.kind==='development-audit'?audit(payload):{summary:'Done',risks:[],recommendation:'Run'};}});
+ input.baseline.snapshot.nodes.push({id:'group',title:'Nested component',nodeType:'group'},{id:'parent',title:'Subsystem',nodeType:'group'});input.baseline.snapshot.edges=[{from:'goal',to:'parent'},{from:'parent',to:'group'},{from:'group',to:'one'},{from:'group',to:'two'}];
+ input.handoff.tasks[0].integrationWith=['two'];input.handoff.tasks[1].integrationWith=['one'];await runtime.start(input);
+ const end=Date.now()+5000;while(agents.calls.filter(c=>c.kind==='development-build').length<2&&Date.now()<end)await delay(10);
+ assert.equal(agents.calls.filter(c=>c.kind==='development-build').length,2);assert.equal([...agents.jobs.values()].filter(j=>j.status==='running').length,2);assert.deepEqual(agents.calls[0].payload.task.integrationWith,['two']);release();await runtime.runs.get('parallel')?.done;assert.equal((await runtime.get('parallel')).status,'completed');
+});
+
+test('an unrelated spec limitation does not veto a pinned usable handoff or independent consumer',async t=>{
+ const {input,agents,finish}=await setup(t,{ids:['contract','consumer'],handler:(request,payload)=>request.kind==='development-audit'&&payload.task.id==='contract'?{...audit(payload),verdict:'hold',findings:[{type:'spec',severity:'medium',summary:'External API account unavailable',evidence:'Local contract works; live API credentials not provided',remedy:'Keep manual entry usable'}]}:undefined});
+ input.handoff.tasks[1].dependsOn=['contract'];const state=await finish();assert.ok(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='consumer'));assert.ok(state.tasks[0].findings.some(f=>f.type==='spec'));assert.equal(state.tasks[1].status,'passed');
+});
+
+test('failed assertions preserve an executable preview, rotate bounded repair builders, and map integration evidence to original nodes',async t=>{
+ const {runtime,agents,finish}=await setup(t,{handler:(request,payload)=>request.kind==='development-audit'&&payload.task.id==='draft-assembly'?{...audit(payload),taskResults:[{taskId:'one',status:'implemented',summary:'Local behavior exists',evidence:'one.js export',checkIds:['invented']},{taskId:'two',status:'partial',summary:'Remote integration missing',evidence:'two.js local stub',checkIds:[]}]}:undefined});
+ runtime.workspace.check=async()=>[{id:'core',label:'Core regression',passed:false,exitCode:1,output:'Wrong calculation'}];const state=await finish(),attempts=agents.calls.filter(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly');
+ assert.equal(attempts.length,3);assert.equal(new Set(attempts.map(c=>c.agent)).size,3);assert.equal(state.latestRunnableId,null);assert.ok(state.latestPreviewId);const release=state.releases.find(r=>r.id===state.latestPreviewId);assert.equal(release.stage,'preview');assert.equal(release.verification.checks[0].passed,false);
+ const launched=await runtime.launch('parallel',release.id);assert.match(await(await fetch(launched.url)).text(),/READY/);assert.equal((await runtime.download('parallel',release.id)).subarray(0,2).toString(),'PK');
+ assert.equal(state.tasks[0].status,'failed');assert.equal(state.tasks[0].integration.verified,false,'invented check IDs cannot substantiate runtime success');assert.equal(state.tasks[1].integration.status,'partial');assert.ok(state.tasks.every(t=>t.phase!=='분석 중'));
+});
+
+test('startup failure reaches the next repair AI with previous code and is fixed within the bounded attempts',async t=>{
+ const {runtime,agents,finish}=await setup(t,{ids:['one'],handler:(request,payload)=>request.kind==='development-build'&&payload.task.id==='draft-assembly'?build('draft-assembly',[{path:'index.html',action:'write',content:payload.findings.some(f=>f.evidence.includes('fixture startup defect'))?'<main>READY repaired</main>':'<main>READY</main>'}]):undefined});
+ const launch=runtime.workspace.launch.bind(runtime.workspace);runtime.workspace.launch=async(p,...args)=>{if(!(await readFile(path.join(p,'index.html'),'utf8')).includes('repaired'))throw Object.assign(new Error('fixture startup defect'),{safe:true});return launch(p,...args);};
+ const state=await finish();assert.ok(state.latestRunnableId,JSON.stringify({events:state.events.filter(e=>e.type==='release-blocked'),tasks:state.tasks.map(t=>({id:t.id,error:t.error,findings:t.findings})),calls:agents.calls.filter(c=>c.kind==='development-build').map(c=>({id:c.payload.task.id,findings:c.payload.findings}))}));const assemblyCalls=agents.calls.filter(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly');assert.equal(assemblyCalls.length,1,'first recovery must receive the initial failed startup');assert.ok(assemblyCalls[0].payload.findings.some(f=>f.evidence.includes('fixture startup defect')));
+});
+
+test('explicit deferral of draft assembly does not restart it with another provider',async t=>{
+ let release;const gate=new Promise(r=>{release=r;});t.after(()=>release());
+ const {runtime,agents,input}=await setup(t,{ids:['one'],handler:async(request,payload)=>{if(request.kind==='development-build'&&payload.task.id==='draft-assembly')await gate;return request.kind==='development-build'?build(payload.task.id):request.kind==='development-audit'?audit(payload):{summary:'Done',risks:[],recommendation:'Run'};}});
+ runtime.workspace.check=async()=>[{id:'core',label:'Core',passed:false,exitCode:1,output:'Failed'}];const cancel=agents.cancel.bind(agents);agents.cancel=id=>{const result=cancel(id);release();return result;};await runtime.start(input);const end=Date.now()+6000;while(!agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly')&&Date.now()<end)await delay(10);
+ await runtime.defer('parallel',{taskId:'draft-assembly'});await runtime.runs.get('parallel')?.done;assert.equal(agents.calls.filter(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly').length,1);assert.equal((await runtime.get('parallel')).status,'completed');
+});
+
+test('HTTP startup alone preserves a draft but does not end the remaining functional recovery attempts',async t=>{
+ const {runtime,agents,finish}=await setup(t,{ids:['one'],handler:(request,payload)=>request.kind==='development-audit'?{...audit(payload),verdict:'hold',unverifiedCriteria:['No functional runtime evidence']}:undefined});runtime.workspace.check=async()=>[];
+ const state=await finish();assert.ok(state.latestPreviewId);assert.equal(state.releases.at(-1).stage,'draft');assert.equal(agents.calls.filter(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly').length,3);assert.equal(state.releases.at(-1).verification.audit,'incomplete');
+});

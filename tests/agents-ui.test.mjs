@@ -20,11 +20,11 @@ test('local connection, response test, parallel planning with partial failure, p
  globalThis.indexedDB=new IDBFactory();globalThis.BroadcastChannel=undefined;globalThis.fetch=(url,options)=>nativeFetch(new URL(url,base),options);
  window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
  let clipboard='';Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async value=>{clipboard=value;}}}});
- const storage=await import('../public/storage.js?v=0.11.0');await storage.openStore();await storage.saveState({projects:[validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교 프로그램',instructions:'한국어로 대화'})]},0);
+ const storage=await import('../public/storage.js?v=0.12.0');await storage.openStore();await storage.saveState({projects:[validateProject({id:'kaf',name:'KAF',description:'대한항공 가격 비교 프로그램',instructions:'한국어로 대화'})]},0);
  await import('../public/app.js');const $=s=>document.querySelector(s),click=s=>{assert.ok($(s),s);$(s).click();},submit=s=>$(s).dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
  click('[data-action="agents"]');await until(()=>$('.agent-connection-list')?.textContent.includes('설치 확인'));assert.equal(requestCount,0);
  click('[data-ac="copy-token"]');await until(()=>clipboard.length===64);assert.ok(!document.body.textContent.includes(clipboard));
- assert.match($('.runner-diagnostics').textContent,/v0.11.0/);const pairToken=clipboard;click('[data-ac="copy-diagnostics"]');await until(()=>clipboard!==pairToken);assert.ok(!clipboard.includes(pairToken));assert.equal(JSON.parse(clipboard).runner.version,'0.11.0');
+ assert.match($('.runner-diagnostics').textContent,/v0.12.0/);const pairToken=clipboard;click('[data-ac="copy-diagnostics"]');await until(()=>clipboard!==pairToken);assert.ok(!clipboard.includes(pairToken));assert.equal(JSON.parse(clipboard).runner.version,'0.12.0');
  click('[data-ac="probe"][data-agent="codex"]');await until(()=>$('.agent-error').textContent.includes('응답을 확인'));assert.equal(requestCount,1);assert.match($('.agent-connection-list').textContent,/응답 확인됨/);click('[data-ac="close"]');
  click('[data-action="open"][data-id="kaf"]');await until(()=>location.hash==='#kaf');click('[data-action="planning"]');click('[data-pa="ai-review"]');await until(()=>$('[data-intake-form]'));
  const saved=async()=>(await storage.readState()).projects[0].planning;assert.equal((await saved()).nodes.length,1);
@@ -39,7 +39,7 @@ test('local connection, response test, parallel planning with partial failure, p
 });
 
 test('hosted client only contacts loopback after explicit pairing, keeps token out of URLs and rejects arbitrary network hosts',async()=>{
- const {RunnerClient,runnerURL,connectionReport}=await import('../public/agent-client.js?v=0.11.0');const calls=[];const storage=new Map();const client=new RunnerClient({storage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},fetcher:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({agents:[]})};}});
+ const {RunnerClient,runnerURL,connectionReport}=await import('../public/agent-client.js?v=0.12.0');const calls=[];const storage=new Map();const client=new RunnerClient({storage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},fetcher:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({agents:[]})};}});
  assert.equal(calls.length,0);assert.throws(()=>runnerURL('https://example.com'),/현재 PC/);assert.throws(()=>runnerURL('http://127.0.0.1:4173/secret'),/현재 PC/);assert.throws(()=>runnerURL('http://user:pass@localhost:4173'),/현재 PC/);
  const token='a'.repeat(64);await client.connect('http://127.0.0.1:4173',token);assert.equal(calls.length,1);assert.ok(!calls[0].url.includes(token));assert.equal(calls[0].options.headers.Authorization,'Bearer '+token);assert.ok(storage.get('agent-desk-runner').includes(token));assert.ok(!connectionReport(client).includes(token));assert.ok(calls[0].url.endsWith('/api/agents/refresh'));assert.equal(calls[0].options.method,'POST');
 });

@@ -28,3 +28,8 @@ test('selected-node organization preserves unselected boundary links and explici
  assert.ok(next.nodes.some(n=>n.id===c.id));assert.ok(next.edges.some(e=>e.from===a.id&&e.to===child.id));
  const removed=organizePlan(p,[a.id,child.id],{summary:'제외',nodes:[],excluded:[{id:a.id,reason:'범위 밖'},{id:child.id,reason:'상위와 함께 제외'}]},{agent:'codex'});assert.equal(removed.proposals[0].nodeId,null);assert.equal(removed.nodes.length,3);
 });
+
+test('integration references follow child components when a peer becomes a group',()=>{
+ const {p,a,b,c}=sample();a.integrationWith=[c.id];c.integrationWith=[a.id];const proposal={summary:'기능을 구성 요소로 분해',nodes:[{...item('bundle',[a.id]),nodeType:'group',instructions:'',criteria:'하위 구성 완료'},{...item('component',[],'bundle'),nodeType:'task',derivedFrom:[a.id]}],excluded:[]};
+ const next=organizePlan(p,[a.id],proposal,{agent:'codex',runId:'subdivide'}),group=next.nodes.find(n=>n.title==='bundle'),child=next.nodes.find(n=>n.title==='component');assert.equal(group.nodeType,'group');assert.equal(group.integrationWith,undefined);assert.deepEqual(child.integrationWith,[c.id]);assert.deepEqual(next.nodes.find(n=>n.id===c.id).integrationWith,[child.id]);assert.deepEqual(validatePlan(next),next);
+});

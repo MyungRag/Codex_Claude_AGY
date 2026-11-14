@@ -130,3 +130,8 @@ test('role rotation preserves independent audit and configurable global switchin
  assert.equal(rotateRoles(next,{authors:['codex','claude'],switchCount:1}).allowed,true,'review provenance is tracked at execution rather than rejecting the role');
  assert.deepEqual(config.roles,{builder:'codex',auditor:'claude',challenger:'agy'});
 });
+
+test('an unresolved specification does not prevent repairing independent implementation errors',()=>{
+ assert.deepEqual(actions([task('repair','failed',{findings:[{type:'spec',status:'open'},{type:'implementation',status:'open'}]})]),{repair:'build'});
+ assert.throws(()=>validateDevelopment({...defaultDevelopment(),draftAttempts:4}),/1~3/);
+});

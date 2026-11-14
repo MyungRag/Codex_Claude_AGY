@@ -180,7 +180,8 @@ export class DevelopmentWorkspace{
  }
  async automaticChecks(workspace,launch,{signal,nodeId}={}){
   const root=await this.root(workspace,{mutable:true}),files=(await listFiles(root,this.limits)).files.map(f=>f.path),results=[];
-  if(files.includes('agent-desk.test.mjs'))results.push(...await this.check(workspace,[{id:'auto-unit',label:'기본 기능 검사 · Node.js',command:'node',args:['--test','agent-desk.test.mjs'],automatic:true}],{signal}));
+  const testFiles=files.filter(name=>/(?:^|\/)[^/]+\.test\.(?:mjs|cjs|js)$/.test(name)).sort();
+  if(testFiles.length)results.push(...await this.check(workspace,[{id:'auto-unit',label:'기능·통합 검사 · Node.js',command:'node',args:['--test',...testFiles],automatic:true}],{signal}));
   if(launch.kind!=='static'||!files.includes(launch.entry)||!files.includes('agent-desk.checks.json'))return results;
   const sha=await this.git(root,['rev-parse','HEAD']);let server;
   try{
