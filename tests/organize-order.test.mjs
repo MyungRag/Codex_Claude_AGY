@@ -116,7 +116,7 @@ test('organizer preview displays resolved predecessor names, implementation step
   item('screen',[b.id],{...meta({order:1,dependsOn:['core'],functionSteps:['<script>검증 단계</script>','실제 연동 확인']}),parentId:'group'})
  ]);
  sessionStorage.setItem('agent-desk-organize-'+project.id,JSON.stringify({selectedIds:[a.id,b.id],baseChange:p.changeNumber,agent:'codex',instruction:'',job:{id:'preview-order-job',status:'succeeded',result}}));
- const {openOrganizer}=await import('../public/organize-ui.js?v=0.12.0');
+ const {openOrganizer}=await import('../public/organize-ui.js?v=0.13.0');
  await openOrganizer({project,plan:p,selectedIds:[a.id,b.id],onApply:()=>{},onClose:()=>{}});
  const body=document.querySelector('.organize-preview-tree');assert.ok(body);
  assert.match(body.textContent,/묶음 · 직접 실행하지 않음/);assert.match(body.textContent,/우선순위 #1/);assert.match(body.textContent,/선행 구현: core/);assert.match(body.textContent,/함수 구현 순서 \(2단계\)/);

@@ -1,6 +1,6 @@
-import {jobActivityState} from './progress-model.js?v=0.12.0';
-import {runner,AGENT_INFO} from './agent-client.js?v=0.12.0';
-import {MODEL_PRESETS,EFFORT_LABELS,settingLabel,formatTokens,modelCapability,supportedEfforts,settingsIssue} from './agent-settings.js?v=0.12.0';
+import {jobActivityState} from './progress-model.js?v=0.13.0';
+import {runner,AGENT_INFO} from './agent-client.js?v=0.13.0';
+import {MODEL_PRESETS,EFFORT_LABELS,settingLabel,formatTokens,modelCapability,supportedEfforts,settingsIssue} from './agent-settings.js?v=0.13.0';
 export const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function effortOptions(agent,settings,catalog){
  const efforts=supportedEfforts(agent,settings,catalog),invalid=settings.effort&&!efforts.includes(settings.effort);

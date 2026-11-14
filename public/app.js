@@ -1,9 +1,9 @@
-import {mountActivityBanner} from './execution-monitor.js?v=0.12.0';
-import {openConnections} from './agent-ui.js?v=0.12.0';
-import {mountPlanner} from './planning.js?v=0.12.0';
-import {mountDevelopment} from './development.js?v=0.12.0';
-import {COLORS,MAX_FILE_BYTES,MAX_PROJECTS,validateProject,readBackup,importCopies,selectProjects} from './model.js?v=0.12.0';
-import {openStore,readState,saveState} from './storage.js?v=0.12.0';
+import {mountActivityBanner} from './execution-monitor.js?v=0.13.0';
+import {openConnections} from './agent-ui.js?v=0.13.0';
+import {mountPlanner} from './planning.js?v=0.13.0';
+import {mountDevelopment} from './development.js?v=0.13.0';
+import {COLORS,MAX_FILE_BYTES,MAX_PROJECTS,validateProject,readBackup,importCopies,selectProjects} from './model.js?v=0.13.0';
+import {openStore,readState,saveState} from './storage.js?v=0.13.0';
 
 const $ = (selector, root=document) => root.querySelector(selector);
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -43,7 +43,7 @@ const channel = typeof BroadcastChannel==='function' ? new BroadcastChannel('age
 let planner=null,developmentView=null,stopActivityBanner=null;
 const isPlanning=()=>location.hash.endsWith('/planning');
 const isActivity=()=>location.hash.endsWith('/activity');
-const isDevelopment=()=>location.hash.endsWith('/development')||isActivity();
+const isDevelopment=()=>/\/development(?:\/(?:preview|progress|results|activity))?$/.test(location.hash)||isActivity();
 const activeProject = () => state.projects.find(p=>p.id===location.hash.slice(1).split('/')[0]);
 async function commit(projects, revision=state.revision, folderUpdates=[],redraw=true) {
   const next = await saveState({projects},revision,folderUpdates);
@@ -70,7 +70,7 @@ function shell() {
     <div class="sidebar-bottom"><div class="agent-row"><span class="agent-symbol mint">C</span><span class="agent-symbol orange">✳</span><span class="agent-symbol blue">A</span></div><p>세 에이전트, 하나의 공간.</p><small>Codex · Claude · Antigravity</small><div class="storage-indicator"><span></span>이 브라우저에 저장됨</div></div>
   </aside>
   <div class="main-wrap"><header class="topbar"><div class="breadcrumb">워크스페이스<span>/</span><button data-action="list">프로젝트</button>${active?`<span>/</span><strong>${esc(active.name)}</strong>`:''}</div><div class="topbar-actions"><button class="button compact" data-action="agents">${icon('link')}AI 연결</button><div class="pc-select current-device">${icon('monitor')}<span>현재 PC</span></div></div></header>
-  <main id="main" class="${active&&(isPlanning()||isDevelopment())?'planning-main':''}" tabindex="-1">${active?`<div class="project-subnav"><button data-action="overview" data-id="${active.id}" class="${!isPlanning()&&!isDevelopment()?'active':''}">${icon('folder')}프로젝트 정보</button><button data-action="planning" data-id="${active.id}" class="${isPlanning()?'active':''}">${icon('layers')}기획 보드</button><button data-action="development" data-id="${active.id}" class="${isDevelopment()&&!isActivity()?'active':''}">${icon('check')}개발·검토</button><button data-action="activity" data-id="${active.id}" class="${isActivity()?'active':''}">${icon('monitor')}AI 실행 확인</button><span>아이디어에서 실행 가능한 결과까지</span></div><div id="global-ai-status"></div>${isPlanning()?'<div id="planning-root"></div>':isDevelopment()?'<div id="development-root"></div>':detail(active)}`:list()}</main><footer class="page-footer"><span>Agent Desk <span class="muted">/</span> 프로젝트 · 기획 · 개발·검토 <small class="app-version">v0.12.0</small></span><a href="/download.html">${icon('download')} Windows 다운로드</a><button data-action="storage-info">${icon('info')}다른 PC에서 이어하기</button></footer></div>`;
+  <main id="main" class="${active&&(isPlanning()||isDevelopment())?'planning-main':''}" tabindex="-1">${active?`<div class="project-subnav"><button data-action="overview" data-id="${active.id}" class="${!isPlanning()&&!isDevelopment()?'active':''}">${icon('folder')}프로젝트 정보</button><button data-action="planning" data-id="${active.id}" class="${isPlanning()?'active':''}">${icon('layers')}기획 보드</button><button data-action="development" data-id="${active.id}" class="${isDevelopment()&&!isActivity()?'active':''}">${icon('check')}개발·검토</button><button data-action="activity" data-id="${active.id}" class="${isActivity()?'active':''}">${icon('monitor')}AI 실행 확인</button><span>아이디어에서 실행 가능한 결과까지</span></div><div id="global-ai-status"></div>${isPlanning()?'<div id="planning-root"></div>':isDevelopment()?'<div id="development-root"></div>':detail(active)}`:list()}</main><footer class="page-footer"><span>Agent Desk <span class="muted">/</span> 프로젝트 · 기획 · 개발·검토 <small class="app-version">v0.13.0</small></span><a href="/download.html">${icon('download')} Windows 다운로드</a><button data-action="storage-info">${icon('info')}다른 PC에서 이어하기</button></footer></div>`;
 }
 function list() {
   const projects=selectProjects(state.projects,{query,filter,sort});
@@ -114,7 +114,7 @@ function render(){
       return state.revision;
     }
   });
-  if(project&&isDevelopment())developmentView=mountDevelopment($('#development-root'),{initialPage:isActivity()?'activity':'method',
+  if(project&&isDevelopment())developmentView=mountDevelopment($('#development-root'),{initialPage:isActivity()||location.hash.endsWith('/development/activity')?'activity':location.hash.match(/\/development\/(preview|progress|results)$/)?.[1]||'method',
     project,revision:state.revision,toast,icon,exportProject:()=>exportProjects([state.projects.find(p=>p.id===project.id)]),
     goPlanning:()=>{if(developmentView&&!developmentView.canLeave())return;history.pushState(null,'',`#${project.id}/planning`);render();},
     save:async(development,expectedRevision)=>{

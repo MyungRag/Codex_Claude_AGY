@@ -19,7 +19,7 @@ test('UI: current PC/Git editor, folder selection/cancel, and No/Yes deletion pr
   window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new window.Event('close'));};
   let folderCalls=0;
   window.showDirectoryPicker=async()=>{folderCalls++;return {kind:'directory',name:'선택한 KAF'};};
-  const storage=await import('../public/storage.js?v=0.12.0');
+  const storage=await import('../public/storage.js?v=0.13.0');
   await storage.openStore();
   const project=validateProject({id:'kaf',name:'KAF',paths:{current:'C:\\KAF'},instructions:'Keep instructions',files:[{name:'reference.txt',data:'aGk='}]});
   const keep=validateProject({id:'keep',name:'다른 프로젝트'});

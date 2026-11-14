@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Windows 다운로드 · Agent Desk</title>
-  <link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/style.css?v=0.12.0">
+  <link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/style.css?v=0.13.0">
   <style>
     .download-page{max-width:760px;margin:8vh auto;padding:32px 24px}.download-page h1{font-size:32px;margin:17px 0;letter-spacing:-1px}.download-page p{line-height:1.9;color:var(--muted);font-size:13px}.download-box{margin:28px 0;padding:28px;background:var(--surface);border:1px solid var(--border);border-radius:14px}.download-box .button{font-size:14px;padding:14px 20px;margin-bottom:14px}.download-page ol{padding-left:22px;line-height:2.1;color:#c9d8cf;font-size:13px}.download-page li{padding:8px 0}.download-page code{padding:2px 6px;border-radius:4px;background:#273a2d;color:var(--mint);overflow-wrap:anywhere}.download-page a{text-decoration:underline;text-underline-offset:4px;color:var(--mint)}.download-page a.button{text-decoration:none;color:#13271c}.download-page #download-status{margin:10px 0;color:var(--mint)}.download-page .small{font-size:11px}.download-page h2{font-size:17px;margin:24px 0 9px}.download-page .back-link{text-decoration:none}.download-page .error{color:#f4b8a6!important}
   </style>
@@ -16,7 +16,7 @@
     <p>프로젝트·기획 보드·개발·검토와 세 AI의 연결 실행기를 담은 Windows 패키지입니다.<br>Node.js 20 이상이 필요하며, 별도의 패키지 설치는 필요하지 않습니다.</p>
     <div class="download-box">
       <button class="button primary" id="download-button">Windows ZIP 다운로드 ↓</button>
-      <p class="small">v0.12.0 · agent-desk-windows.zip · 주 AI 초안·병렬 검토 · 후속 기능 편입 · 연속 병렬 개발 · 작업별 보류</p>
+      <p class="small">v0.13.0 · agent-desk-windows.zip · 실행 설정 복구 · AI 자동 인계 · 완료 상태 · 누적 시간 · 실시간 노드 진행</p>
       <p id="download-status" role="status" aria-live="polite"></p>
       <p class="small">앱 안에서 파일이 저장되지 않으면 이 페이지 주소를 복사해<br>Edge 또는 Chrome 주소창에서 여세요.</p>
       <p class="small">현재 실행 중인 앱의 소스 파일을 ZIP으로 묶습니다. 브라우저에 저장된 프로젝트·기획은 별도로 백업하세요.</p>
@@ -32,7 +32,7 @@
     <h2>개발·검토 시작하기</h2><p>프로젝트 상단의 <strong>개발·검토</strong>를 여세요. 통합안 등 다섯 방식의 흐름도와 장단점을 보고, 전체 총괄·Builder·Auditor·Challenger를 지정합니다. 기획과 업무 분담을 저장한 뒤 검사 명령과 프로그램 실행 방법을 설정하고 시작하세요. 개발에는 Git과 사용할 AI CLI가 필요합니다.</p><p>원본 폴더와 별도의 작업본에서 구현·검사합니다. 실패·미개발 부분을 다른 방식으로 다시 처리하며, 이전에 실행을 확인한 버전은 보존합니다. 시작 확인과 검토 통과는 각각 표시하고 남은 한계도 결과물에 포함합니다.</p><h2>기획과 AI 요청</h2>
     <p>기획 요청은 AI 한 개 또는 여러 개를 선택할 수 있습니다. 여러 개면 주 AI의 초안을 다른 AI가 동시에 검토하고 주 AI가 정리합니다. 후속 기능은 초안 실행과 분리해 보관하고 나중에 선택하여 편입할 수 있습니다. 개발 작업은 기본 20분 한도로 해당 작업만 보류하며, 독립 작업은 계속합니다. 요청 번호를 받기 전에도 취소할 수 있습니다. 중요한 미답변 질문을 남긴 채 기획을 확정하며, 확정 메모를 보존하면서 이전 탭으로 이동할 수 있습니다.</p>
     <ol><li><strong>질문·결정</strong>에서 답변 필요 / 확인 필요 / 결정 완료를 항목별로 관리합니다. AI 세 개가 검토한 질문을 미리 보고 반영하며, 같은 질문의 AI 의견은 함께 보관합니다.</li><li>노드 정리를 적용하면 관련 질문도 함께 정리됩니다. 답변한 노드가 바뀌면 <strong>답변을 보존하고 재확인</strong>을 요청합니다. 되돌리기로 함께 복원할 수 있습니다.</li><li><strong>기획 확정 · 업무 분담</strong>에서 미결정·충돌·완료 기준을 확인하고 버전으로 확정합니다. 담당 AI·선행 작업·지시를 편집하고 분담서를 내려받을 수 있습니다. 작업 실행은 시작하지 않습니다.</li></ol>
-    <p><strong>기존 실행기 명령창을 닫고 새 ZIP의 실행기를 시작</strong>하세요. 웹 새로고침만으로는 PC 실행기가 업데이트되지 않습니다. AI 연결에서 PC 실행기 v0.12.0을 확인하세요.</p>
+    <p><strong>기존 실행기 명령창을 닫고 새 ZIP의 실행기를 시작</strong>하세요. 웹 새로고침만으로는 PC 실행기가 업데이트되지 않습니다. AI 연결에서 PC 실행기 v0.13.0을 확인하세요.</p>
     <h2>회사 PC에서 이어하기</h2>
     <ol><li>지금 사용 중인 화면에서 <strong>프로젝트·기획 백업</strong> 또는 <strong>전체 프로젝트 백업</strong>으로 JSON을 저장하세요.</li><li>회사 PC에서 이 ZIP을 내려받아 실행하고, 프로젝트 목록의 <strong>가져오기</strong>로 JSON을 불러오세요.</li><li><strong>현재 PC 폴더</strong>를 회사 폴더로 다시 선택하고 각 CLI 로그인·AI 연결을 확인하세요.</li><li>집으로 돌아올 때도 회사에서 최신 JSON을 백업하세요. 가져오기는 기존 프로젝트를 보존하고 새 복사본을 추가합니다.</li></ol>
     <p>GitHub는 프로그램 코드를 옮기는 데 사용합니다. <strong>push</strong>는 올리기, <strong>clone</strong>은 처음 받기, <strong>pull</strong>은 변경분 받기입니다. 현재 버전의 브라우저 기획 데이터는 Git으로 자동 동기화되지 않으므로 JSON 백업이 필요합니다. 실제 개발 기록과 결과물은 PC 사용자 홈의 <code>.agent-desk/development</code> 폴더에 별도로 저장됩니다.</p>

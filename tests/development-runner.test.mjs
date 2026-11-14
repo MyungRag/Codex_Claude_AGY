@@ -20,6 +20,7 @@ if(args.includes('--help')){console.log('--output-schema --ignore-user-config --
 let input='';for await(const chunk of process.stdin)input+=chunk;
 if(provider==='agy')input=JSON.parse(input).message.content;
 const value=JSON.parse(input.slice(input.indexOf('{'))),instructions=value.task?.instructions||'';
+if(instructions==='QUOTA'&&value.role==='Builder'&&provider==='codex'){console.error('quota limit 429');process.exit(1);}
 if(instructions==='HANG'){setInterval(()=>{},1000);await new Promise(()=>{});}
 const previous=value.previousFindings||[];
 const issue={type:'implementation',severity:instructions==='CRITICAL'?'critical':'medium',summary:'Fixture defect',evidence:'Pinned source has BAD marker',remedy:'Replace BAD with GOOD'};
@@ -56,7 +57,7 @@ test('real CLI envelopes build isolated files, run checks, pin independent audit
  const state=await finished(runtime);assert.equal(state.status,'completed');assert.equal(state.tasks[0].status,'passed',JSON.stringify(state));
  assert.match(state.tasks[0].artifactSha,/^[a-f0-9]{40}$/);assert.equal(state.tasks[0].checks[0].passed,true);assert.equal(state.tasks[0].checks[0].codeSha,state.tasks[0].audit.codeSha);
  assert.equal(state.tasks[0].audit.agent,'claude');assert.ok([...agentRunner.jobs.values()].some(job=>job.agent==='agy'&&JSON.parse(job.prompt).role==='overall-lead'));
- const builder=[...agentRunner.jobs.values()].find(job=>job.kind==='development-build');assert.equal(JSON.parse(builder.prompt).baseline.snapshot.items[0].question,'Unknown choice');assert.equal(builder.timeoutMs,20*60000);
+ const builder=[...agentRunner.jobs.values()].find(job=>job.kind==='development-build');assert.equal(JSON.parse(builder.prompt).baseline.snapshot.items[0].question,'Unknown choice');assert.equal(builder.timeoutMs,5*60000,'leave time for another provider within the 20-minute task budget');
  assert.equal(await readFile(path.join(source,'original.txt'),'utf8'),'unchanged');await assert.rejects(readFile(path.join(source,'index.html')),{code:'ENOENT'});
  assert.ok(state.latestRunnableId);const launch=await runtime.launch('project-1',state.latestRunnableId);assert.match(await (await fetch(launch.url)).text(),/GOOD/);
  const zip=await runtime.download('project-1',state.latestRunnableId);assert.equal(zip.subarray(0,2).toString(),'PK');
@@ -125,4 +126,15 @@ test('structured response validators reject unsupported paths, false passes, dup
  assert.throws(()=>parseDevelopmentResponse({...audit,unverifiedCriteria:['missing execution']},'development-audit'));
  assert.throws(()=>parseDevelopmentResponse({...audit,previousFindings:[{id:'old',status:'open',evidence:'still broken'}]},'development-audit'));
  assert.throws(()=>parseDevelopmentResponse({summary:'x',files:[{path:'ok.js',action:'write',content:'x'.repeat(300001)}],limitations:[]},'development-build'));
+});
+
+test('durable project activity records retain planning usage across runner restart without prompt/result data',async t=>{
+ const f=await setup(t);await f.runtime.recordActivity({id:'planning-call',agent:'claude',kind:'planning-draft',context:{projectId:'project-1'},status:'succeeded',createdAt:'2026-01-01T00:00:00Z',startedAt:'2026-01-01T00:00:01Z',finishedAt:'2026-01-01T00:00:11Z',usage:{totalTokens:10},prompt:'private prompt',result:{private:'response'}});
+ await f.runtime.recordActivity({id:'planning-call',agent:'claude',kind:'planning-draft',context:{projectId:'project-1'},status:'succeeded',startedAt:'2026-01-01T00:00:01Z',finishedAt:'2026-01-01T00:00:11Z',usage:{totalTokens:10}});
+ const restarted=new DevelopmentRunner({agentRunner:f.agentRunner,dataRoot:f.dataRoot});t.after(()=>restarted.close());const state=await restarted.get('project-1');assert.equal(state.activityHistory.length,1);assert.equal(state.activityHistory[0].usage.totalTokens,10);assert.equal(state.activityHistory[0].prompt,undefined);assert.equal(state.activityHistory[0].result,undefined);
+});
+
+
+test('actual CLI quota envelope hands work to lead and keeps both failed and successful calls durably',async t=>{
+ const f=await setup(t),input=payload(f.source,{instructions:'QUOTA',config:{lead:'agy'}});await f.runtime.start(input);const state=await finished(f.runtime);assert.ok(state.latestRunnableId);assert.equal(state.tasks[0].builder,'agy');assert.ok(state.aiCalls.some(c=>c.agent==='codex'&&c.errorCode==='QUOTA_LIMIT'));assert.ok(state.activityHistory.some(c=>c.agent==='codex'&&c.errorCode==='QUOTA_LIMIT'));assert.ok(state.activityHistory.some(c=>c.agent==='agy'&&c.status==='succeeded'));
 });

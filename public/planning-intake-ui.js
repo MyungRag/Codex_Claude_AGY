@@ -1,7 +1,7 @@
-import {agentCardsHTML} from './execution-monitor.js?v=0.12.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.12.0';
-import {esc,jobActivityHTML,jobMetadataHTML} from './model-controls.js?v=0.12.0';
-import {planningPrompt,validateIntake} from './planning-intake-model.js?v=0.12.0';
+import {agentCardsHTML} from './execution-monitor.js?v=0.13.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.13.0';
+import {esc,jobActivityHTML,jobMetadataHTML} from './model-controls.js?v=0.13.0';
+import {planningPrompt,validateIntake} from './planning-intake-model.js?v=0.13.0';
 const sessions=new Map(),name=id=>AGENT_INFO.find(a=>a.id===id)?.name||id;
 const finished=j=>['succeeded','failed','cancelled'].includes(j?.status);
 export function draftPreview(draft,plan){

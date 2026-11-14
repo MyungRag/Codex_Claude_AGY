@@ -52,6 +52,7 @@ export class DevelopmentRunner{
   if(!agentRunner)throw new Error('agentRunner is required');
   this.agentRunner=agentRunner;this.dataRoot=dataRoot;this.workspace=workspace??new DevelopmentWorkspace({dataRoot:path.join(dataRoot,'workspaces')});this.pollMs=pollMs;
   this.providerQueues=new Map();this.publishQueues=new Map();this.states=new Map();this.loading=new Map();this.writes=new Map();this.locks=new Map();this.runs=new Map();this.launches=new Map();this.launchRequests=new Map();this.closed=false;
+  const previous=agentRunner.onSettled;agentRunner.onSettled=async job=>{await previous?.(job);await this.recordActivity(job);};
  }
  async _exclusive(projectId,fn){const prior=this.locks.get(projectId)??Promise.resolve();const next=prior.catch(()=>{}).then(fn);this.locks.set(projectId,next);try{return await next;}finally{if(this.locks.get(projectId)===next)this.locks.delete(projectId);}}
  async _load(projectId){
@@ -74,11 +75,17 @@ export class DevelopmentRunner{
  }
  _event(state,type,message,extra={}){state.events.push({id:randomUUID(),at:now(),type,message:redact(message),...extra});}
  _view(state){
-  const copy=clone(state);delete copy.requests;delete copy.cancelledRequests;delete copy.workingPath;delete copy.fileAuthors;
+  const copy=clone(state);delete copy.requests;delete copy.cancelledRequests;delete copy.workingPath;delete copy.fileAuthors;copy.sourceAvailable=!!state.workingPath&&state.tasks.some(t=>t.changedPaths?.length);
   for(const attempt of copy.attempts){delete attempt.input;delete attempt.inputHash;delete attempt.workspacePath;}
   for(const release of copy.releases)delete release.path;
   for(const task of copy.tasks){delete task.candidatePath;delete task.auditPath;task.phase=taskProgress(task,copy).label;}
   return copy;
+ }
+ async recordActivity(job){
+  const projectId=job.context?.projectId;if(!/^[\w-]{1,80}$/.test(projectId||'')||['__proto__','constructor','prototype'].includes(projectId))return;
+  const state=await this._load(projectId),record={};
+  for(const key of ['id','agent','kind','context','status','createdAt','startedAt','finishedAt','usage','actualModel','errorCode'])if(job[key]!==undefined)record[key]=clone(job[key]);
+  state.activityHistory??=[];const old=state.activityHistory.findIndex(c=>c.id===job.id);if(old<0)state.activityHistory.push(record);else state.activityHistory[old]=record;await this._persist(state);
  }
  async get(projectId){const state=await this._load(projectId),view=this._view(state);view.observedAt=now();view.aiCalls=(state.aiCalls||[]).map(call=>{const job=call.jobId?this.agentRunner.get(call.jobId):null;return {...call,...(job?{lastCheckedAt:now(),status:['failed','cancelled','succeeded','interrupted'].includes(call.status)?call.status:job.status,startedAt:job.startedAt||call.startedAt,finishedAt:job.finishedAt||call.finishedAt,activity:job.activity,process:job.process,progress:job.progress,usage:job.usage,actualModel:job.actualModel,outputIdleMs:job.outputIdleMs}:{}),error:call.error};});return view;}
  async preview(payload){
@@ -151,26 +158,52 @@ export class DevelopmentRunner{
  }
  async _queue(map,key,fn){const prior=map.get(key)||Promise.resolve();const next=prior.catch(()=>{}).then(fn);map.set(key,next);try{return await next;}finally{if(map.get(key)===next)map.delete(key);}}
  async _ai(state,attempt,operation,provider,kind,payload,task){
+  const config=attempt.input.config,signal=operation.controller.signal,tried=new Set();attempt.unavailable??={};
+  const pool=[...new Set([provider,config.lead,...config.developers,...Object.values(attempt.roles)])];
+  const busy=a=>this.providerQueues.has(a)||[...(this.agentRunner.jobs?.values()||[])].some(j=>j.agent===a&&!j.settled&&['running','queued'].includes(j.status));
+  const independent=a=>a!==task?.builder&&!task?.authors?.includes(a);
+  const next=()=>pool.filter(a=>!tried.has(a)&&!attempt.unavailable[a]).sort((a,b)=>(kind==='development-audit'?Number(!independent(a))-Number(!independent(b)):0)||Number(busy(a))-Number(busy(b))||Number(b===config.lead)-Number(a===config.lead))[0];
+  let current=config.autoFailover&&attempt.unavailable[provider]?next():provider;
+  if(!current)throw problem('사용 가능한 AI가 없습니다. 저장한 코드와 실패 기록을 보존했습니다.');
+  for(;;){
+   checkAbort(signal);tried.add(current);
+   if(task&&kind==='development-build'){task.builder=current;task.agent=current;}
+   if(task&&kind==='development-audit'){task.auditor=current;task.reviewMode=independent(current)?'independent':'self';payload={...payload,reviewMode:task.reviewMode};}
+   try{const result=await this._aiOnce(state,attempt,operation,current,kind,payload,task);return {...result,_agent:current};}
+   catch(error){
+    if(signal.aborted||task?.userDeferred||!config.autoFailover||['AGENT_CANCELLED','ABORT_ERR'].includes(error.code))throw error;
+    const unavailable=['QUOTA_LIMIT','AUTH_REQUIRED','MODEL_UNAVAILABLE','EFFORT_UNSUPPORTED','CLI_OPTION_UNSUPPORTED','AGENT_TIMEOUT','AGENT_REQUEST_FAILED'].includes(error.code);
+    if(!unavailable&&kind!=='development-audit')throw error;
+    if(unavailable)attempt.unavailable[current]={code:error.code,at:now()};
+    const alternative=tried.size<3?next():null;if(!alternative)throw error;
+    this._event(state,'agent-handoff',`${current} 요청 실패 (${error.code||'응답 형식'}). ${alternative}가 저장한 코드·검사·현재 단계를 이어갑니다.`,{taskId:task?.id||null,from:current,agent:alternative,kind,errorCode:error.code||'RESPONSE_INVALID'});
+    if(task&&kind==='development-audit'&&!independent(alternative))this._event(state,'self-review','독립 검토 가능한 AI가 없어 자체 검토로 계속합니다.',{taskId:task.id});
+    current=alternative;await this._persist(state);
+   }
+  }
+ }
+ async _aiOnce(state,attempt,operation,provider,kind,payload,task){
   const priorPhase=task?.phase;const call={id:randomUUID(),attemptId:attempt.id,agent:provider,kind,role:payload.role,taskId:task?.id||null,status:'queued',requestedAt:now()};state.aiCalls??=[];state.aiCalls.push(call);await this._persist(state);
   if(task){task.phase='AI 요청 대기';task.waitReason=provider+'의 앞선 요청 또는 실행 자리 대기';}
   return this._queue(this.providerQueues,provider,async()=>{
    let job,onAbort;
    try{
     checkAbort(operation.controller.signal);
+    if(attempt.input.config.autoFailover&&attempt.unavailable?.[provider])throw Object.assign(problem('이번 시도에서 사용할 수 없는 AI입니다.'),{code:attempt.unavailable[provider].code});
     payload={...payload,decisionPolicy:'Adopted baseline AI defaults are concrete implementation requirements. Preserve explicit user answers. Isolate truly missing external facts; implement independent functionality. Do not relabel adopted defaults as unresolved specifications.'};
     const prompt=JSON.stringify(payload);if(prompt.length>145000)throw problem('코드와 기획 문맥이 AI 요청 크기를 초과합니다. 작업 범위를 나누어 주세요.');
     // Planning jobs use the same provider process pool. Wait rather than fail a task.
     while([...this.agentRunner.jobs?.values()||[]].some(j=>j.agent===provider&&!j.settled&&(j.status==='running'||j.settled===false))){checkAbort(operation.controller.signal);await delay(this.pollMs);}
-    job=this.agentRunner.create({agent:provider,kind,prompt,requestId:randomUUID(),settings:{...attempt.input.agentSettings[provider],...(!attempt.input.agentSettings[provider]?.waitMinutes&&attempt.input.config.taskMinutes?{waitMinutes:Math.min(20,attempt.input.config.taskMinutes)}:{})},context:{projectId:state.projectId,taskId:task?.id,role:payload.role}});
+    job=this.agentRunner.create({agent:provider,kind,prompt,requestId:randomUUID(),settings:{...attempt.input.agentSettings[provider],...(attempt.input.agentSettings[provider]?.waitMinutes===undefined&&attempt.input.config.taskMinutes?{waitMinutes:(attempt.input.config.autoFailover?(attempt.input.config.taskMinutes>=40?10:5):Math.min(20,attempt.input.config.taskMinutes))}:{})},context:{projectId:state.projectId,taskId:task?.id,role:payload.role}});
     Object.assign(call,{jobId:job.id,status:'running',startedAt:now()});if(task){task.waitReason='';task.phase=kind==='development-build'?'구현 중':kind==='development-audit'?'검토 중':'분석 중';}
     operation.jobs.add(job.id);this._event(state,'agent-start',`${provider} ${kind.replace('development-','')} 요청을 실행합니다.`,{taskId:task?.id??null,agent:provider,jobId:job.id});await this._persist(state);
     onAbort=()=>this.agentRunner.cancel(job.id);operation.controller.signal.addEventListener('abort',onAbort,{once:true});if(operation.controller.signal.aborted)onAbort();
     while(!terminal(job.status)){await delay(this.pollMs);job=this.agentRunner.get(job.id);if(!job)throw problem('AI 요청 기록을 찾지 못했습니다.');}
     await this.agentRunner.jobs?.get(job.id)?.done;checkAbort(operation.controller.signal);
     Object.assign(call,{usage:job.usage,actualModel:job.actualModel,activity:job.activity,progress:job.progress});
-    if(job.status!=='succeeded')throw problem(job.error||'AI 응답을 완료하지 못했습니다. 연결·사용량·모델 설정을 확인해 주세요.');
+    if(job.status!=='succeeded')throw Object.assign(problem(job.error||'AI 응답을 완료하지 못했습니다. 연결·사용량·모델 설정을 확인해 주세요.'),{code:job.errorCode||'AGENT_REQUEST_FAILED'});
     const result=parseDevelopmentResponse(job.result,kind);call.status='succeeded';this._event(state,'agent-complete',`${provider} 응답을 받았습니다.`,{taskId:task?.id??null,agent:provider,jobId:job.id});return result;
-   }catch(error){call.status=operation.controller.signal.aborted?'cancelled':'failed';call.error=errorText(error);throw error;}
+   }catch(error){call.status=operation.controller.signal.aborted?'cancelled':'failed';call.error=errorText(error);call.errorCode=error.code||'RESPONSE_INVALID';throw error;}
    finally{if(task){task.waitReason='';task.phase=task.status==='running'?(priorPhase||'다음 단계 준비'):task.status==='passed'?'검증 완료':task.status==='blocked'?'선행 조건 대기':task.artifactSha?'일부 구현 · 검증 필요':'미개발 · 재시도 필요';}call.finishedAt=now();if(onAbort)operation.controller.signal.removeEventListener('abort',onAbort);if(job)operation.jobs.delete(job.id);await this._persist(state);}
   });
  }
@@ -186,7 +219,8 @@ export class DevelopmentRunner{
  _finding(task,attempt,source,raw,index){return {id:`${task.id}-${attempt.id.slice(0,8)}-${source}-${index+1}`,taskId:task.id,type:raw.type,severity:raw.severity,status:'open',summary:redact(raw.summary),evidence:redact(raw.evidence),remedy:redact(raw.remedy)};}
  async _analysis(state,attempt,operation,task,phase,provider=task.challenger){
   const result=await this._ai(state,attempt,operation,provider,'development-analysis',{role:phase,lead:attempt.lead,task:{id:task.id,title:task.title,instructions:task.instructions,criteria:task.criteria,...normalizeExecutionMeta(task)},baseline:attempt.input.baseline,findings:open(task),checks:task.checks,rule:'Analyze evidence and options. Do not change requirements, claim audit approval, or invent executable checks. Follow adopted defaults. Truly missing external facts affect their related tasks only. Recommend one next step.'},task);
-  task.analyses??=[];task.analyses.push({at:now(),phase,agent:provider,summary:redact(result.summary),recommendation:redact(result.recommendation),risks:result.risks.map((f,i)=>this._finding(task,attempt,'ANALYSIS',f,i))});await this._persist(state);return result;
+  if(phase!=='preflight-verification-plan'&&result._agent)task.challenger=result._agent;
+  task.analyses??=[];task.analyses.push({at:now(),phase,agent:result._agent||provider,summary:redact(result.summary),recommendation:redact(result.recommendation),risks:result.risks.map((f,i)=>this._finding(task,attempt,'ANALYSIS',f,i))});await this._persist(state);return result;
  }
  async _execute(state,attempt,operation){
   const signal=operation.controller.signal;
@@ -206,12 +240,7 @@ export class DevelopmentRunner{
     const minutes=attempt.input.config.taskMinutes,timer=minutes?setTimeout(()=>{child.deferred=true;child.reason='작업별 대기 한도에 도달했습니다. 다른 작업은 계속합니다.';child.controller.abort();},minutes*60000):null;timer?.unref?.();
     const work=(async()=>{
      try{
-      try{await this._task(state,attempt,child,task,entries.get(task.id).action);}
-      catch(error){
-       const alternative=attempt.input.config.developers.find(agent=>agent!==task.builder);
-       if(signal.aborted||child.controller.signal.aborted||task.artifactSha||entries.get(task.id).action!=='build'||!alternative)throw error;
-       this._event(state,'builder-fallback',task.builder+' 구현 요청 실패: '+errorText(error)+' '+alternative+'에게 1회 재배정합니다.',{taskId:task.id});task.builder=alternative;task.agent=alternative;await this._persist(state);await this._task(state,attempt,child,task,'build');
-      }
+      await this._task(state,attempt,child,task,entries.get(task.id).action);
      }
      catch(error){
       if(signal.aborted)throw error;
@@ -250,7 +279,7 @@ export class DevelopmentRunner{
    await this._tryRelease(state,attempt,operation);
    if(state.tasks.some(t=>t.status!=='passed')||!state.latestRunnableId)await this._assembleDraft(state,attempt,operation);
    await this._tryRelease(state,attempt,operation);
-   try{const report=await this._ai(state,attempt,operation,attempt.lead,'development-analysis',{role:'overall-lead',strategy:attempt.strategy,baseline:attempt.baseline,previewRelease:state.releases.find(r=>r.id===state.latestPreviewId)?{id:state.latestPreviewId,stage:state.releases.find(r=>r.id===state.latestPreviewId).stage,limitations:state.releases.find(r=>r.id===state.latestPreviewId).limitations}:null,runnableRelease:state.releases.find(r=>r.id===state.latestRunnableId)?{id:state.latestRunnableId,stage:state.releases.find(r=>r.id===state.latestRunnableId).stage}:null,tasks:state.tasks.map(t=>({id:t.id,title:t.title,status:t.status,readiness:t.readiness,findings:open(t),checks:t.checks})),rule:'Summarize the actually runnable draft, separately from complete verification. Explain usable functionality, isolated missing features, and next alternatives. Partial implementation and self-review do not mean the whole project must stop. Summarize integration status, unresolved limitations and next steps. Do not override task verdicts or invent verification.'});attempt.summary=redact(report.summary);attempt.recommendation=redact(report.recommendation);}catch(error){if(signal.aborted)throw error;attempt.summary='총괄 요약을 받지 못했습니다. 개별 작업과 검사 기록을 확인해 주세요.';}
+   try{const report=await this._ai(state,attempt,operation,attempt.lead,'development-analysis',{role:'overall-lead',strategy:attempt.strategy,baseline:attempt.baseline,previewRelease:state.releases.find(r=>r.id===state.latestPreviewId)?{id:state.latestPreviewId,stage:state.releases.find(r=>r.id===state.latestPreviewId).stage,limitations:state.releases.find(r=>r.id===state.latestPreviewId).limitations}:null,runnableRelease:state.releases.find(r=>r.id===state.latestRunnableId)?{id:state.latestRunnableId,stage:state.releases.find(r=>r.id===state.latestRunnableId).stage}:null,tasks:state.tasks.map(t=>({id:t.id,title:t.title,status:t.status,readiness:t.readiness,findings:open(t),checks:t.checks})),rule:'Summarize the actually runnable draft, separately from complete verification. Explain usable functionality, isolated missing features, and next alternatives. Partial implementation and self-review do not mean the whole project must stop. Summarize integration status, unresolved limitations and next steps. Do not override task verdicts or invent verification.'});attempt.summaryAgent=report._agent;attempt.summary=redact(report.summary);attempt.recommendation=redact(report.recommendation);}catch(error){if(signal.aborted)throw error;attempt.summary='총괄 요약을 받지 못했습니다. 개별 작업과 검사 기록을 확인해 주세요.';}
    state.status='completed';attempt.status='completed';this._event(state,'completed','개발·검토 실행이 끝났습니다. 개별 판정과 실행 가능한 버전의 한계를 확인해 주세요.');
   }catch(error){if(signal.aborted)await Promise.allSettled([...(operation.tasks?.values()||[])].map(child=>child.done));state.status=signal.aborted?'cancelled':'interrupted';attempt.status=state.status;state.error=signal.aborted?null:errorText(error);for(const task of state.tasks)if(task.status==='running'){task.status=task.artifactSha?'partial':'pending';task.error=signal.aborted?'요청을 취소했습니다.':state.error;}this._event(state,state.status,signal.aborted?'AI 요청과 검사를 취소했습니다. 기존 실행 가능한 버전은 유지됩니다.':state.error);}
   finally{attempt.finishedAt=now();state.activeAttemptId=null;await this._persist(state);}
@@ -275,7 +304,7 @@ export class DevelopmentRunner{
   let build=action==='build',submitted=false,mergeRetries=0;
   for(;;){checkAbort(signal);
    if(build){
-    const context=await this.workspace.context(state.workingPath),result=await this._ai(state,attempt,operation,task.builder,'development-build',{role:'Builder',lead:attempt.lead,project:{name:attempt.input.project.name,instructions:attempt.input.project.instructions},baseline:attempt.input.baseline,task:{id:task.id,title:task.title,instructions:task.instructions,deliverable:task.deliverable,criteria:task.criteria,...normalizeExecutionMeta(task)},files:context.files,excluded:context.excluded??[],findings:open(task),checks:task.checks,configuredChecks:config.checks,launch:config.launch,rule:'Return complete meaningful source changes for this task, as relative files. Preserve unrelated work. Independent sibling tasks may be building concurrently. Implement your declared interfaces and assigned files, preserve unrelated files, and use integrationWith peers as integration contracts, not reasons to wait or omit behavior. Respect task.dependsOn contracts and use task.functionSteps as the relevant implementation and verification plan. The steps describe logical development stages, not file write order; files are applied atomically as one submission. Contract-first or mock scaffolding is allowed when clearly reported as unverified, never as working integration. Do not execute commands. Report limitations honestly. Implement all adopted baseline answers, including AI assumptions. Only truly missing external information or contradictory explicit requirements warrant spec limitations; isolate affected behavior and implement independent functionality. When configuredChecks is empty, provide agent-desk.test.mjs using node:test/assert for the implemented core behavior. For a static UI also provide agent-desk.checks.json with {checks:[{name,nodeIds:[existing task IDs],steps:[{action:"click"|"fill"|"select",selector,value}],expect:[{selector,text,mode:"equals"|"contains"}]}]}. These are executed by the host using a clean browser; use actual UI selectors and meaningful expected outputs, including invalid input. Preserve and extend earlier checks. Do not claim you executed checks. Do not edit review records, Git metadata, dependencies or secrets.'},task);
+    const context=await this.workspace.context(state.workingPath),result=await this._ai(state,attempt,operation,task.builder,'development-build',{role:'Builder',lead:attempt.lead,project:{name:attempt.input.project.name,instructions:attempt.input.project.instructions},baseline:attempt.input.baseline,task:{id:task.id,title:task.title,instructions:task.instructions,deliverable:task.deliverable,criteria:task.criteria,...normalizeExecutionMeta(task)},files:context.files,excluded:context.excluded??[],findings:open(task),checks:task.checks,configuredChecks:config.checks,launch:config.launch,previousStartupFailure:state.lastPreviewFailure||null,rule:'Return complete meaningful source changes for this task, as relative files. Preserve unrelated work. Independent sibling tasks may be building concurrently. Implement your declared interfaces and assigned files, preserve unrelated files, and use integrationWith peers as integration contracts, not reasons to wait or omit behavior. Respect task.dependsOn contracts and use task.functionSteps as the relevant implementation and verification plan. The steps describe logical development stages, not file write order; files are applied atomically as one submission. Contract-first or mock scaffolding is allowed when clearly reported as unverified, never as working integration. Do not execute commands. Report limitations honestly. Implement all adopted baseline answers, including AI assumptions. Only truly missing external information or contradictory explicit requirements warrant spec limitations; isolate affected behavior and implement independent functionality. When configuredChecks is empty, provide agent-desk.test.mjs using node:test/assert for the implemented core behavior. For a static UI also provide agent-desk.checks.json with {checks:[{name,nodeIds:[existing task IDs],steps:[{action:"click"|"fill"|"select",selector,value}],expect:[{selector,text,mode:"equals"|"contains"}]}]}. These are executed by the host using a clean browser; use actual UI selectors and meaningful expected outputs, including invalid input. Preserve and extend earlier checks. Do not claim you executed checks. If the app needs a build/server, provide agent-desk.launch.json with {kind:"command",command:{command:"node" or "npm",args:[...]},url:"http://127.0.0.1:{port}/",prepare:[{command:"npm",args:["install"]},{command:"npm",args:["run","build"]}]} using only commands needed by this project, or {kind:"static",entry:"index.html"} for a dependency-free app. Repair the actual previousStartupFailure; do not repeat the same failed entry or configuration. Package manifests and build scripts are allowed; never include node_modules, secrets, Git metadata or review records. Prefer a small dependency-free executable core when external dependencies cannot be prepared.'},task);
     let publication;try{publication=await this._publish(state,attempt,operation,task,context,result);}catch(error){if(error.mergeConflict&&mergeRetries++<1){this._event(state,'merge-retry',error.message,{taskId:task.id});continue;}throw error;}
     const {candidate,applied,codeSha}=publication;task.candidatePath=candidate.path;task.artifactSha=codeSha;task.readiness={ready:false,codeSha,evidence:''};
     const changed=applied.changedPaths??result.files.map(f=>f.path);task.changedPaths=[...new Set([...(task.changedPaths??[]),...changed])];
@@ -298,7 +327,7 @@ export class DevelopmentRunner{
    const auditCopy=await this.workspace.create({projectId:state.projectId,sourcePath:attempt.input.project.path,previousPath:auditSource,attemptId:randomUUID()});task.auditPath=auditCopy.path;
    const checks=await this._checks(auditCopy,config,{signal,...(!task.isAssembly?{nodeId:task.id}:{})});checkAbort(signal);if(checks.some(check=>check.codeSha&&check.codeSha!==codeSha))throw problem('검사 대상 코드와 제출된 커밋 SHA가 일치하지 않습니다. 기록을 복구한 뒤 다시 검토해 주세요.');task.checks=checks.map(check=>({...check,output:redact(check.output),codeSha:check.codeSha??codeSha,at:check.at??now()}));
    const context=await this.workspace.context(auditSource);const auditPayload={role:'Auditor',featureTasks:task.isAssembly?state.tasks.filter(t=>!t.isAssembly).map(t=>({id:t.id,title:t.title,criteria:t.criteria})):[],reviewMode:task.reviewMode,strategy:attempt.strategy,baseline:attempt.input.baseline,codeSha,task:{id:task.id,title:task.title,instructions:task.instructions,criteria:task.criteria,...normalizeExecutionMeta(task)},files:context.files,checks:task.checks,configuredChecks:config.checks,launch:config.launch,previousFindings:open(task),rule:'For an assembly audit, return taskResults for every featureTasks ID, with implemented/partial/not_implemented, source evidence and IDs of supplied host checks that exercise that feature. Never invent check IDs or treat static inspection as runtime proof. For a normal task use taskResults=[]. Report handoff.ready and concrete evidence separately from verdict: ready means required contracts/files are usable by dependent work even if full execution evidence is missing. Never mark ready with a broken required interface or unresolved external prerequisite. Assess only this task and its implementation stage; future UI integration is not a prerequisite for a planning/contract task. Browser/environment failures are unverified evidence, not proof of implementation defects. Identify genuine faults with source evidence. If reviewMode is self, report this as self-review, not independent review. Inspect this pinned source against completion criteria and the planned functionSteps. Verify prerequisite contracts and end-to-end behavior; function names, file presence and syntax checks alone do not prove completion. Host checks ran on a separate isolated copy. Static source inspection is not execution evidence. Pass only with sufficient evidence and no unresolved implementation errors/spec ambiguity/unverified criteria. Give a status and evidence for EVERY previous finding ID. Adopted AI assumptions are concrete implementation requirements and must not be reclassified as unanswered spec issues. Truly unresolved external facts affect only relevant tasks. Suggestions alone need not fail. Report missing evidence and limitations.'};
-   let audit;try{audit=await this._ai(state,attempt,operation,task.auditor,'development-audit',auditPayload,task);}catch(error){if(signal.aborted||task.auditor===task.builder)throw error;task.auditor=task.builder;task.reviewMode='self';this._event(state,'self-review','독립 검토 응답을 받지 못해 작성 AI의 자체 검토로 계속합니다.',{taskId:task.id});audit=await this._ai(state,attempt,operation,task.builder,'development-audit',{...auditPayload,reviewMode:'self'},task);}
+   const audit=await this._ai(state,attempt,operation,task.auditor,'development-audit',auditPayload,task);
 
    if(task.isAssembly)for(const result of audit.taskResults||[]){const feature=state.tasks.find(t=>t.id===result.taskId&&!t.isAssembly);if(!feature)continue;const verified=result.status==='implemented'&&result.checkIds.length>0&&result.checkIds.every(id=>task.checks.some(c=>c.id===id&&c.passed))&&!!result.evidence.trim();feature.integration={...redactObject(result),codeSha,verified,agent:task.auditor,at:now()};}
    counts.reviews++;round.reviews++;attempt.reviewCount++;task.reviewCount++;task.readiness={ready:audit.handoff?.ready??audit.verdict==='pass',evidence:redact(audit.handoff?.evidence||audit.verifiedCriteria.map(c=>c.evidence).join(' · ')),codeSha};task.audit={mode:task.reviewMode,verdict:audit.verdict,summary:redact(audit.summary),agent:task.auditor,codeSha,at:now(),verifiedCriteria:audit.verifiedCriteria.map(c=>({criterion:redact(c.criterion),evidence:redact(c.evidence)})),unverifiedCriteria:audit.unverifiedCriteria.map(redact)};
@@ -312,7 +341,7 @@ export class DevelopmentRunner{
    task.status=passed?'passed':audit.verdict==='hold'||environmentOnly?'limited':'failed';task.retryable=!environmentOnly&&(!open(task).some(f=>f.type==='spec')||open(task).some(f=>f.type==='implementation'));task.phase=passed?'완료':'한계 기록';
    if(passed){task.verifiedStrategies=[...new Set([...(task.verifiedStrategies??[]),attempt.strategy])];task.needsVerification=false;}
    this._event(state,'audit',`${task.reviewMode==='self'?'자체 검토':'독립 검토'}: ${passed?'통과':task.status==='limited'?'판정 보류':'불통과'}`,{taskId:task.id,verdict:task.audit.verdict,codeSha,auditor:task.auditor,reviewCount:task.reviewCount});await this._persist(state);
-   if(policy.evidenceAnalysis&&(!passed||!config.checks.length)){try{await this._analysis(state,attempt,operation,task,'evidence-gaps');}catch(error){if(signal.aborted)throw error;this._event(state,'analysis-unavailable','추가 근거 분석을 받지 못했습니다. 기존 검토 판정은 유지합니다.',{taskId:task.id});}}
+   if(policy.evidenceAnalysis&&!passed){try{await this._analysis(state,attempt,operation,task,'evidence-gaps');}catch(error){if(signal.aborted)throw error;this._event(state,'analysis-unavailable','추가 근거 분석을 받지 못했습니다. 기존 검토 판정은 유지합니다.',{taskId:task.id});}}
    if(passed||action==='verify'||!task.retryable)break;
    if(round.revisions<(task.isAssembly?0:config.limits.maxRevisions)&&round.reviews<config.limits.maxReviews){build=true;task.status='running';continue;}
    if(policy.issueAnalysis)try{await this._analysis(state,attempt,operation,task,'limit-reached');}catch(error){if(signal.aborted)throw error;}
@@ -329,15 +358,16 @@ export class DevelopmentRunner{
   if(attempt.integrationAttempted)return;attempt.integrationAttempted=true;
   const earlier=state.tasks.filter(t=>!t.isAssembly),config=attempt.input.config;
   const task={id:'draft-assembly',isAssembly:true,title:'실행 가능한 초안 통합',builder:config.roles.builder,auditor:config.roles.auditor,challenger:config.roles.challenger,agent:config.roles.builder,authors:[],dependsOn:[],dependencyIssues:[],dependencyState:'defined',nodeType:'task',order:999,functionSteps:['남은 한계와 사용 가능한 기능 확인','필수 진입점·화면·기능 연결','미구현 기능 안내·비활성화 또는 명시적 대체 동작','시작·핵심 동작과 기존 기능 검사'],status:'pending',disposition:'open',revisionCount:0,reviewCount:0,artifactSha:null,checks:[],findings:[],instructions:'처음부터 끝까지 실행 가능한 v1으로 통합하세요. 기존 동작·사용자 결정은 보존하고 미구현 기능은 안내·비활성화하거나 명시적 대체 동작으로 격리하세요. 빈 화면이나 모든 기능이 비활성인 껍데기를 완성품으로 제출하지 마세요. 실제로 동작하는 핵심 사용자 흐름을 완성하세요. 대체 동작을 실제 연동 성공으로 표현하지 마세요. 해결되지 않은 기능과 시도한 방법은 limitations에 남기세요. nodeIds 없는 전체 통합 검사는 이 단계에서 실행됩니다. 기존 검사를 삭제하거나 기대값을 낮춰 실패를 숨기지 마세요. 의도적으로 제외한 기능은 화면에서 안내되는 동작을 검사하세요.',deliverable:'기존 기능과 사용 가능한 부분을 연결한 실행 초안, 진입점, 기본 기능·화면 검사, 남은 한계',criteria:'프로그램 시작, 핵심 사용자 흐름의 실제 동작, 미구현 기능의 명확한 안내, 기존 동작 보존. 후속 수정에 필요한 한계와 선택 기록.'};
+  task.instructions+=' 사용자가 보류한 기능은 다시 구현하지 않고 화면에 한계로 표시하세요: '+JSON.stringify(earlier.filter(t=>t.userDeferred).map(t=>({id:t.id,title:t.title})))+'.';
   task.instructions+=' 이번 실행 범위: '+JSON.stringify(attempt.input.selection?.taskIds||earlier.map(t=>t.id))+'. 범위 밖의 기능을 임의로 재설계하지 마세요. 개별 결과: '+JSON.stringify(earlier.map(t=>({id:t.id,title:t.title,status:t.status,changedPaths:t.changedPaths,limitations:open(t).map(f=>({summary:f.summary,remedy:f.remedy}))}))).slice(0,14000);
   // Review concrete unresolved defects again on the assembled artifact. Original task verdicts are preserved.
   task.findings=earlier.flatMap(t=>open(t).filter(f=>f.type==='implementation'||f.type==='spec'||f.severity==='critical').map(f=>({...clone(f),id:'assembly-'+f.id,taskId:task.id,sourceTaskId:t.id})));
   state.tasks.push(task);this._event(state,'draft-assembly','주 개발 AI가 동작 가능한 기능을 연결하고 남은 기능을 한계로 정리합니다.',{taskId:task.id});await this._persist(state);
-  const pool=[...new Set([attempt.roles.builder,...config.developers])];
+  const pool=[...new Set([attempt.lead,attempt.roles.builder,...config.developers])];
   for(let index=0;index<(config.draftAttempts??3);index++){
    checkAbort(operation.controller.signal);if(task.userDeferred)break;
    if(state.lastPreviewFailure)task.findings.push(this._finding(task,attempt,'STARTUP-'+index,{type:'implementation',severity:'high',summary:'프로그램 시작 확인 실패',evidence:state.lastPreviewFailure.message,remedy:'기존 시작 설정과 진입점을 확인하고 실제로 시작되는 프로그램을 복구하세요.'},0));
-   task.builder=pool[index%pool.length];task.agent=task.builder;task.auditor=pool.find(a=>a!==task.builder)||attempt.roles.auditor;task.challenger=pool.find(a=>a!==task.builder&&a!==task.auditor)||attempt.roles.challenger;task.assemblyAttempt=index+1;
+   const available=pool.filter(a=>!attempt.unavailable?.[a]);task.builder=(available.length?available:pool)[index%(available.length||pool.length)];task.agent=task.builder;task.auditor=pool.find(a=>a!==task.builder)||attempt.roles.auditor;task.challenger=pool.find(a=>a!==task.builder&&a!==task.auditor)||attempt.roles.challenger;task.assemblyAttempt=index+1;
    if(index){attempt.taskCounts[task.id]?.rounds.push({builder:task.builder,auditor:task.auditor,challenger:task.challenger,revisions:0,reviews:0});this._event(state,'draft-repair',`초안 복구 ${index+1}/${config.draftAttempts}: ${task.builder}가 이전 코드·검사 실패와 한계를 이어받습니다.`,{taskId:task.id});}
    task.instructions+=' 실행 실패가 있으면 시작 파일과 핵심 사용자 흐름을 먼저 복구하고, 외부 연결이 없는 기능만 명확히 분리하세요. 변경 파일이 없어도 실행 가능한 상태인지 실제 검사를 확인해야 합니다. 이전 시도의 지적을 숨기거나 검사 기대값을 낮추지 마세요.';
    try{await this._boundedTask(state,attempt,operation,task,'build');}catch(error){if(operation.controller.signal.aborted)throw error;task.status='limited';task.phase='통합 한계';task.error=errorText(error);await this._persist(state);}
@@ -346,8 +376,9 @@ export class DevelopmentRunner{
   }
  }
  async _checks(copy,config,options){
+  const effective=config.autoLaunch&&this.workspace.resolveLaunch?await this.workspace.resolveLaunch(copy,config.launch):{launch:config.launch};
   const checks=await this.workspace.check(copy,config.checks,options);
-  if(!config.checks.length&&this.workspace.automaticChecks)checks.push(...await this.workspace.automaticChecks(copy,config.launch,options));
+  if(!config.checks.length&&this.workspace.automaticChecks)checks.push(...await this.workspace.automaticChecks(copy,effective.launch,options));
   return checks;
  }
  async _tryRelease(state,attempt,operation){
@@ -360,8 +391,9 @@ export class DevelopmentRunner{
   if(!child)throw problem('현재 진행 중인 작업을 선택해 주세요.',409);state.tasks.find(t=>t.id===taskId).userDeferred=true;child.deferred=true;child.reason='사용자가 이 작업만 보류했습니다. 독립 작업은 계속합니다.';child.controller.abort();this._event(state,'task-deferred',child.reason,{taskId});await this._persist(state);return this._view(state);
  }
  async _release(state,attempt,operation){
-  checkAbort(operation.controller.signal);const config=attempt.input.config;
+  checkAbort(operation.controller.signal);let config=attempt.input.config;
   if(!state.workingPath)return;
+  const resolved=config.autoLaunch&&this.workspace.resolveLaunch?await this.workspace.resolveLaunch(state.workingPath,config.launch):{launch:config.launch,source:'사용자 설정'};config={...config,launch:resolved.launch};
   const codeSha=await this.workspace.commit(state.workingPath,'Agent Desk runnable candidate');
   const assembled=state.tasks.find(t=>t.isAssembly&&t.status==='passed'&&t.audit?.codeSha===codeSha);
   const unresolvedCore=!assembled&&state.tasks.some(task=>task.findings.some(f=>f.status!=='resolved'&&(f.severity==='critical'||(f.type==='implementation'&&f.severity==='high'))));
@@ -371,12 +403,12 @@ export class DevelopmentRunner{
   let checks;try{checks=await this._checks(checkCopy,config,{signal:operation.controller.signal});}catch(error){if(operation.controller.signal.aborted)throw error;checks=[{id:'checks-unavailable',label:'실행 검사 도구 오류',passed:false,exitCode:null,failureKind:'environment',output:errorText(error)}];}checkAbort(operation.controller.signal);
   const failedChecks=checks.some(check=>!check.passed&&check.exitCode!==null&&check.failureKind!=='environment');if(failedChecks)this._event(state,'release-blocked','기능 검사 실패를 기록했습니다. 시작 가능한 현재 초안은 검증 중 미리보기로 보관하고 이전 실행 버전은 유지합니다.');
   const releaseId=randomUUID(),snapshot=await this.workspace.snapshot(state.workingPath,{projectId:state.projectId,releaseId});let smoke;
-  try{smoke=await this.workspace.launch(snapshot,config.launch,{signal:operation.controller.signal});checkAbort(operation.controller.signal);}catch(error){if(operation.controller.signal.aborted)throw error;state.lastPreviewFailure={codeSha,message:errorText(error),at:now()};this._event(state,'release-blocked','현재 후보의 시작 확인에 실패했습니다: '+errorText(error));await this._persist(state);return;}finally{await smoke?.stop?.();}
+  try{smoke=await this.workspace.launch(snapshot,config.launch,{signal:operation.controller.signal});checkAbort(operation.controller.signal);}catch(error){if(operation.controller.signal.aborted)throw error;state.lastPreviewFailure={codeSha,launch:clone(config.launch),source:resolved.source,message:errorText(error),at:now()};this._event(state,'release-blocked','현재 후보의 시작 확인에 실패했습니다: '+errorText(error));await this._persist(state);return;}finally{await smoke?.stop?.();}
   const limitations=state.tasks.filter(task=>task.status!=='passed'||task.needsVerification||task.audit?.codeSha!==codeSha||task.findings.some(f=>f.status!=='resolved')).map(task=>({taskId:task.id,title:task.title,status:task.status,disposition:task.disposition,findings:task.findings.filter(f=>f.status!=='resolved').map(clone),...(task.needsVerification||task.audit?.codeSha!==codeSha?{description:'현재 코드 SHA에 대한 검토가 완료되지 않았습니다.'}:{})}));
   for(const check of checks.filter(c=>!c.passed))limitations.push({taskId:null,title:check.label,status:'unverified',description:check.output});
   if(!checks.length)limitations.push({taskId:null,title:'자동 검사 미설정',status:'unverified',description:'시작 HTTP 응답만 확인했습니다. 화면 동작과 기능 검증을 의미하지 않습니다.'});
   const trace={baseline:clone(attempt.input.baseline),tasks:state.tasks.map(task=>({id:task.id,title:task.title,dependsOn:task.dependsOn,artifactSha:task.artifactSha,builder:task.builder,auditor:task.auditor,challenger:task.challenger,needsVerification:!!task.needsVerification,decisionIds:baselineContext(attempt.input.baseline,task.id).items.map(i=>i.id),changedPaths:task.changedPaths||[],status:task.status,integration:clone(task.integration||null),checks:clone(task.checks),audit:clone(task.audit||null)}))};
-  const release={trace,stage:failedChecks||unresolvedCore?'preview':checks.length>0&&checks.every(c=>c.passed)&&state.tasks.every(t=>t.status==='passed'&&!t.needsVerification&&t.audit?.codeSha===codeSha)?'reviewed':'draft',id:releaseId,createdAt:now(),codeSha,runnable:true,limitations,entry:config.launch.entry,launch:clone(config.launch),downloadName:`${state.projectId}-${releaseId.slice(0,8)}.zip`,path:snapshot,taskSignature,verification:{reviewMode:state.tasks.some(t=>t.audit?.mode==='self')?'self-or-mixed':'independent',startup:'http-response',audit:state.tasks.every(task=>task.status==='passed'&&!task.needsVerification&&task.audit?.codeSha===codeSha)?'pass':'incomplete',checks:checks.map(check=>({...check,output:redact(check.output),codeSha}))}};
+  const release={trace,launchSource:resolved.source,stage:failedChecks||unresolvedCore?'preview':checks.length>0&&checks.every(c=>c.passed)&&state.tasks.every(t=>t.status==='passed'&&!t.needsVerification&&t.audit?.codeSha===codeSha)?'reviewed':'draft',id:releaseId,createdAt:now(),codeSha,runnable:true,limitations,entry:config.launch.entry,launch:clone(config.launch),downloadName:`${state.projectId}-${releaseId.slice(0,8)}.zip`,path:snapshot,taskSignature,verification:{reviewMode:state.tasks.some(t=>t.audit?.mode==='self')?'self-or-mixed':'independent',startup:'http-response',audit:state.tasks.every(task=>task.status==='passed'&&!task.needsVerification&&task.audit?.codeSha===codeSha)?'pass':'incomplete',checks:checks.map(check=>({...check,output:redact(check.output),codeSha}))}};
   state.lastPreviewFailure=null;state.releases.push(release);state.latestPreviewId=releaseId;if(release.stage!=='preview')state.latestRunnableId=releaseId;this._event(state,'runnable','시작 확인을 통과한 실행 버전을 보관했습니다. 남은 한계와 검토 방식·판정은 별도로 표시합니다.',{releaseId,codeSha});await this._persist(state);
  }
  async _releaseById(projectId,releaseId){id(releaseId);const state=await this._load(projectId),release=state.releases.find(r=>r.id===releaseId);if(!release?.runnable)throw problem('실행 가능한 저장 버전을 찾지 못했습니다.',404);return {state,release};}
@@ -409,6 +441,7 @@ export class DevelopmentRunner{
   return {url:result.url,releaseId,runnable:true,limitations:clone(registration.release.limitations)};
  }
  async stopLaunch(projectId,releaseId){id(projectId);id(releaseId);const key=projectId+':'+releaseId;this.launchRequests.get(key)?.controller.abort();const running=this.launches.get(key);await running?.stop();this.launches.delete(key);return {stopped:true,releaseId};}
+ async downloadSource(projectId){const state=await this._load(projectId);if(!state.workingPath||!state.tasks.some(t=>t.changedPaths?.length))throw problem('아직 생성한 소스가 없습니다.',404);return this.workspace.packageSource(state.workingPath,{records:this._view(state)});}
  async download(projectId,releaseId){const {release}=await this._releaseById(projectId,releaseId);return this.workspace.packageRelease(release.path,{limitations:release.limitations,launch:release.launch,trace:release.trace});}
  async close(){this.closed=true;for(const operation of this.runs.values()){operation.controller.abort();for(const jobId of operation.jobs)this.agentRunner.cancel(jobId);}for(const pending of this.launchRequests.values())pending.controller.abort();await Promise.allSettled([...this.runs.values()].map(operation=>operation.done));await Promise.allSettled([...this.launchRequests.values()].map(item=>item.done));await Promise.allSettled([...this.launches.values()].map(item=>item.stop()));await Promise.allSettled([...this.writes.values()]);this.launches.clear();}
 }

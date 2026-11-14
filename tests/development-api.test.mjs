@@ -17,6 +17,7 @@ async function fixture(t){
     accept:async(...args)=>{calls.push(['accept',...args]);return state;},
     launch:async(...args)=>{calls.push(['launch',...args]);return {url:'http://127.0.0.1:12345/'};},
     stopLaunch:async(...args)=>{calls.push(['stop',...args]);return {stopped:true};},
+    downloadSource:async id=>{calls.push(['source',id]);return Buffer.from('PK source with failure evidence');},
     download:async(...args)=>{calls.push(['download',...args]);return Buffer.from('PK\x03\x04fixture-release');},
     close:async()=>{}
   };
@@ -35,7 +36,7 @@ async function fixture(t){
 
 test('development execution and release endpoints remain inside the paired loopback API boundary',async t=>{
   const {calls,origin,headers,call}=await fixture(t);
-  const routes=[['GET','/project-1'],['POST','/start'],['POST','/preview'],['POST','/project-1/cancel'],['POST','/project-1/defer'],['POST','/project-1/accept'],['POST','/project-1/releases/release-1/launch'],['GET','/project-1/releases/release-1/download'],['POST','/project-1/releases/release-1/stop']];
+  const routes=[['GET','/project-1'],['GET','/project-1/source'],['POST','/start'],['POST','/preview'],['POST','/project-1/cancel'],['POST','/project-1/defer'],['POST','/project-1/accept'],['POST','/project-1/releases/release-1/launch'],['GET','/project-1/releases/release-1/download'],['POST','/project-1/releases/release-1/stop']];
   for(const [method,route] of routes){
     const options={method,...(method==='POST'?{body:'{}'}:{})};
     assert.equal((await call(route,{...options,headers:{Authorization:''}})).status,401,route);
@@ -115,3 +116,5 @@ test('activity endpoint shares authentication, omits source/error details, and s
  const response=await fetch(origin+'/api/agents/activity',{headers}),data=await response.json();assert.equal(response.status,200);assert.equal(data.jobs[0].context.projectId,'project-1');assert.equal(data.jobs[0].result,undefined);assert.doesNotMatch(JSON.stringify(data),/SHOULD NOT LEAK/);
  const stopped=await call('/project-1/releases/release-1/stop',{method:'POST',body:'{}'});assert.equal(stopped.status,200);assert.deepEqual(calls.pop(),['stop','project-1','release-1']);
 });
+
+test('source download works independently of runnable releases and requires paired authentication',async t=>{const f=await fixture(t),response=await f.call('/project-1/source');assert.equal(response.status,200);assert.match(response.headers.get('Content-Disposition'),/source-project-1.zip/);assert.match(await response.text(),/source with failure evidence/);assert.deepEqual(f.calls,[['source','project-1']]);});

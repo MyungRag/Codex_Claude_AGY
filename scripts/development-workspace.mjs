@@ -182,7 +182,7 @@ export class DevelopmentWorkspace{
   const root=await this.root(workspace,{mutable:true}),files=(await listFiles(root,this.limits)).files.map(f=>f.path),results=[];
   const testFiles=files.filter(name=>/(?:^|\/)[^/]+\.test\.(?:mjs|cjs|js)$/.test(name)).sort();
   if(testFiles.length)results.push(...await this.check(workspace,[{id:'auto-unit',label:'기능·통합 검사 · Node.js',command:'node',args:['--test',...testFiles],automatic:true}],{signal}));
-  if(launch.kind!=='static'||!files.includes(launch.entry)||!files.includes('agent-desk.checks.json'))return results;
+  if(!files.includes('agent-desk.checks.json'))return results;
   const sha=await this.git(root,['rev-parse','HEAD']);let server;
   try{
    const manifest=await readFile(await safeFile(root,'agent-desk.checks.json'),'utf8');if(manifest.length>200000)throw new Error('브라우저 검사 정의가 너무 큽니다.');
@@ -199,6 +199,30 @@ export class DevelopmentWorkspace{
   id(projectId);id(releaseId);const source=await this.root(workspace),destination=path.join(this.dataRoot,'releases',projectId,releaseId);
   await mkdir(path.dirname(destination),{recursive:true});if(await realpath(path.dirname(destination))!==path.dirname(destination))fail('릴리스 저장 경로에 심볼릭 링크가 있습니다.');await mkdir(destination);
   try{await copyTree(source,destination,this.limits);return destination;}catch(error){await rm(destination,{recursive:true,force:true});throw error;}
+ }
+ async resolveLaunch(workspace,fallback){
+  const root=await this.root(workspace),files=(await listFiles(root,this.limits)).files.map(f=>f.path);
+  let launch=launchDefinition(fallback),source='사용자 설정';
+  if(files.includes('agent-desk.launch.json')){
+   const value=await readFile(await safeFile(root,'agent-desk.launch.json'),'utf8');if(value.length>20000)fail('실행 정의가 너무 큽니다.');
+   let raw;try{raw=JSON.parse(value);}catch{fail('agent-desk.launch.json의 JSON 형식을 수정해야 합니다.');}
+   launch=launchDefinition(raw);source='agent-desk.launch.json';
+  }else if(launch.kind==='static'&&!files.includes(launch.entry)){
+   const candidates=['public/index.html','dist/index.html','web/index.html'].filter(f=>files.includes(f));
+   if(candidates.length===1){launch={kind:'static',entry:candidates[0]};source='발견한 시작 파일';}
+  }
+  // Never mistake serving raw TypeScript/JSX for a built app.
+  if(launch.kind==='static'&&files.includes(launch.entry)){
+   const html=await readFile(await safeFile(root,launch.entry),'utf8');
+   if(/<script[^>]+src=["'][^"']+\.(?:tsx?|jsx)(?:[?"'])/i.test(html))fail('시작 페이지가 TypeScript/JSX 소스를 직접 참조합니다. 빌드·서버 실행을 agent-desk.launch.json에 정의하거나 브라우저용 JavaScript로 연결해야 합니다.');
+  }
+  return {launch,source};
+ }
+ async packageSource(workspace,{records}={}){
+  const root=await this.root(workspace),inventory=await listFiles(root,this.limits),entries=[];
+  for(const file of inventory.files)entries.push({name:file.path,body:await readFile(await safeFile(root,file.path))});
+  entries.push({name:'_agent_desk_records.json',body:Buffer.from(JSON.stringify(records,null,2))},{name:'AGENT-DESK-README.txt',body:Buffer.from('생성한 소스·검사 기록입니다. 실행 완료를 보증하는 패키지가 아닙니다. 시작 오류, 기능별 구현 상태와 검사 결과는 _agent_desk_records.json을 확인하세요. 실패한 검사도 그대로 보존합니다. 비밀 파일과 설치된 의존성은 제외합니다.')});
+  return zip(entries);
  }
  async packageRelease(releasePath,{limitations=[],launch={kind:'static',entry:'index.html'},trace=null}={}){
   const root=await this.root(releasePath),definition=launchDefinition(launch),inventory=await listFiles(root,this.limits),entries=[];
@@ -220,7 +244,7 @@ export class DevelopmentWorkspace{
   try{return await this.commandLaunch(runRoot,launch,signal);}catch(error){await rm(runRoot,{recursive:true,force:true});throw error;}
  }
  async staticLaunch(root,launch,signal){
-  const entry=await safeFile(root,launch.entry);if(!(await lstat(entry)).isFile())fail('실행할 정적 진입 파일이 없습니다.');
+  let entry;try{entry=await safeFile(root,launch.entry);if(!(await lstat(entry)).isFile())fail('실행할 정적 진입 파일이 아닙니다: '+launch.entry);}catch(error){if(error.code==='ENOENT')fail('실행할 시작 파일이 없습니다: '+launch.entry+'. 진입 파일을 만들거나 agent-desk.launch.json의 entry/command를 수정하세요.');throw error;}
   const server=createServer(async(request,response)=>{
    try{
     if(!['127.0.0.1:'+server.address().port,'localhost:'+server.address().port].includes(request.headers.host)){response.writeHead(403);response.end();return;}
@@ -232,7 +256,7 @@ export class DevelopmentWorkspace{
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   let stopped=false;const stop=async()=>{if(stopped)return;stopped=true;signal?.removeEventListener('abort',abort);server.closeAllConnections();await new Promise(resolve=>server.close(resolve));};const abort=()=>{void stop();};signal?.addEventListener('abort',abort,{once:true});
-  const url=`http://127.0.0.1:${server.address().port}/`;
+  const url=`http://127.0.0.1:${server.address().port}/${launch.entry.split('/').map(encodeURIComponent).join('/')}`;
   try{checkAbort(signal);const response=await fetch(url,{signal:AbortSignal.timeout(3000)});if(!response.ok)fail('정적 프로그램 실행 확인에 실패했습니다.');await response.arrayBuffer();return {url,stop,kind:'static'};}catch(error){await stop();throw error;}
  }
  async commandLaunch(root,launch,signal){
@@ -306,6 +330,6 @@ if(config.kind==='command'){
 }else{
  await safeFile(root,config.entry);
  const server=createServer(async(req,res)=>{try{if(!['127.0.0.1:'+server.address().port,'localhost:'+server.address().port].includes(req.headers.host))throw Error();const name=decodeURIComponent(new URL(req.url,'http://localhost').pathname).slice(1)||config.entry;const file=await safeFile(root,name),body=await readFile(file);res.writeHead(200,{'Content-Type':MIME[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(body);}catch{res.writeHead(404);res.end('Not found');}});
- server.listen(0,'127.0.0.1',()=>console.log('브라우저에서 여세요: http://127.0.0.1:'+server.address().port+'/'));
+ server.listen(0,'127.0.0.1',()=>console.log('브라우저에서 여세요: http://127.0.0.1:'+server.address().port+'/'+config.entry.split('/').map(encodeURIComponent).join('/')));
 }
 `;}

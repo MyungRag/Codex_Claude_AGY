@@ -20,7 +20,7 @@ const agent=(value,label)=>{ensure(DEVELOPMENT_AGENTS.includes(value),label+' AI
 const strategyId=value=>{ensure(strategyIds.has(value),'협업 방식을 확인해 주세요.');return value;};
 
 export function defaultDevelopment(){
- return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,maxParallel:3,developers:['codex','claude','agy'],taskMinutes:20,draftAttempts:3,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
+ return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,autoFailover:true,autoLaunch:true,maxParallel:3,developers:['codex','claude','agy'],taskMinutes:20,draftAttempts:3,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
 }
 function rolesFrom(raw,base){
  const result={...base};object(raw,'역할');
@@ -55,6 +55,7 @@ export function validateDevelopment(raw){
   ensure(Number.isSafeInteger(value)&&value>=(key==='maxReviews'?1:0)&&value<=1000,'수정·검토·조합 교체 한도는 0~1000의 정수이며 검토는 1회 이상이어야 합니다.');limits[key]=value;
  }
  ensure(raw.autoSwitch===undefined||typeof raw.autoSwitch==='boolean','자동 조합 교체 설정을 확인해 주세요.');
+ for(const key of ['autoFailover','autoLaunch'])ensure(raw[key]===undefined||typeof raw[key]==='boolean',key+' 설정을 확인해 주세요.');
  const checks=array(raw.checks??[],30,'실행 검사').map(check=>{object(check,'검사');return {id:recordId(check.id),label:text(check.label??check.command,200,'검사 이름'),...commandFrom(check)};});
  ensure(new Set(checks.map(check=>check.id)).size===checks.length,'검사 ID가 중복되었습니다.');
  const launchRaw=object(raw.launch??{},'프로그램 실행'),kind=launchRaw.kind??'static';
@@ -69,7 +70,7 @@ export function validateDevelopment(raw){
  const developers=[...new Set(array(raw.developers??Object.values(roles),3,'개발 참여 AI').map(value=>agent(value,'개발 참여')))];ensure(developers.length,'개발 참여 AI를 하나 이상 선택해 주세요.');
  const taskMinutes=raw.taskMinutes??20;ensure([0,5,10,20,40].includes(taskMinutes),'작업별 대기 한도를 확인해 주세요.');
  const draftAttempts=raw.draftAttempts??3;ensure(Number.isInteger(draftAttempts)&&draftAttempts>=1&&draftAttempts<=3,'초안 통합 시도는 1~3회입니다.');
- return {version:1,strategy,lead,roles,overrides,limits,draftAttempts,autoSwitch:raw.autoSwitch===true,maxParallel,developers,taskMinutes,checks,launch:{kind,entry,command,url,prepare}};
+ return {version:1,strategy,lead,roles,overrides,limits,draftAttempts,autoSwitch:raw.autoSwitch===true,autoFailover:raw.autoFailover!==false,autoLaunch:raw.autoLaunch!==false,maxParallel,developers,taskMinutes,checks,launch:{kind,entry,command,url,prepare}};
 }
 
 export function resolveRoles(config,strategy=config?.strategy??'integrated'){

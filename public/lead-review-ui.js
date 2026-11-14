@@ -1,8 +1,8 @@
-import {agentCardsHTML} from './execution-monitor.js?v=0.12.0';
-import {jobActivityState} from './progress-model.js?v=0.12.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.12.0';
-import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.12.0';
-import {decisionTypes} from './decision-core.js?v=0.12.0';
+import {agentCardsHTML} from './execution-monitor.js?v=0.13.0';
+import {jobActivityState} from './progress-model.js?v=0.13.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.13.0';
+import {esc,jobMetadataHTML,jobActivityHTML,modelControls,readModelControls,syncModelControl} from './model-controls.js?v=0.13.0';
+import {decisionTypes} from './decision-core.js?v=0.13.0';
 
 const label=id=>AGENT_INFO.find(a=>a.id===id)?.name||id;
 const live=job=>job&&['running','unknown'].includes(job.status);

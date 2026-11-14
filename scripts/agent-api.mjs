@@ -32,15 +32,15 @@ export function createAgentAPI({runner=new AgentRunner(),developmentRunner,devel
           const payload=await body(req),service=await getDevelopment();
           reply(res,pathname.endsWith('/start')?202:200,await service[pathname.endsWith('/start')?'start':'preview'](payload));return;
         }
-        const route=pathname.match(/^\/api\/agents\/development\/([\w-]{1,80})(?:\/(cancel|accept|defer)|\/releases\/([\w-]{1,80})\/(launch|download|stop))?$/);
+        const route=pathname.match(/^\/api\/agents\/development\/([\w-]{1,80})(?:\/(cancel|accept|defer|source)|\/releases\/([\w-]{1,80})\/(launch|download|stop))?$/);
         if(!route){reply(res,404,{error:'개발 요청 주소를 확인해 주세요.'});return;}
         const [,projectId,action,releaseId,releaseAction]=route;
-        const method=action||['launch','stop'].includes(releaseAction)?'POST':'GET';
+        const method=(action&&action!=='source')||['launch','stop'].includes(releaseAction)?'POST':'GET';
         if(req.method!==method){reply(res,405,{error:method+' 요청이 필요합니다.'});return;}
-        const payload=action||['launch','stop'].includes(releaseAction)?await body(req):undefined,service=await getDevelopment();
-        if(releaseAction==='download'){
-          const archive=await service.download(projectId,releaseId);
-          res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':`attachment; filename="agent-desk-release-${releaseId}.zip"`,'Content-Length':archive.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(archive);return;
+        const payload=(action&&action!=='source')||['launch','stop'].includes(releaseAction)?await body(req):undefined,service=await getDevelopment();
+        if(releaseAction==='download'||action==='source'){
+          const archive=action==='source'?await service.downloadSource(projectId):await service.download(projectId,releaseId);
+          res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':`attachment; filename="agent-desk-${action==='source'?'source-'+projectId:'release-'+releaseId}.zip"`,'Content-Length':archive.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(archive);return;
         }
         const result=releaseAction==='stop'?await service.stopLaunch(projectId,releaseId):releaseAction==='launch'?await service.launch(projectId,releaseId,...(payload?.requestId?[{requestId:payload.requestId}]:[])):action?await service[action](projectId,payload):await service.get(projectId);
         reply(res,200,result);return;
@@ -50,7 +50,7 @@ export function createAgentAPI({runner=new AgentRunner(),developmentRunner,devel
       if(pathname==='/api/agents/activity'&&req.method==='GET'){reply(res,200,{observedAt:new Date().toISOString(),jobs:[...runner.jobs.values()].map(job=>{const {result,error,...view}=runner.view(job);return {...view,error:error?'AI 요청 실패 · 해당 작업의 상세 기록을 확인하세요.':null};})});return;}
       if(pathname==='/api/agents/usage'&&req.method==='GET'){reply(res,200,runner.usage());return;}
       const catalog=pathname.match(/^\/api\/agents\/models\/(codex|claude|agy)$/);if(catalog&&req.method==='GET'){reply(res,200,await runner.models(catalog[1]));return;}
-      if(pathname==='/api/agents/jobs'&&req.method==='POST'){reply(res,202,runner.create(await body(req,AGENT_JOB_BODY_LIMIT)));return;}
+      if(pathname==='/api/agents/jobs'&&req.method==='POST'){const payload=await body(req,AGENT_JOB_BODY_LIMIT);await getDevelopment();reply(res,202,runner.create(payload));return;}
       const requestCancel=pathname.match(/^\/api\/agents\/requests\/([\w-]{8,80})\/cancel$/);
       if(requestCancel&&req.method==='POST'){reply(res,200,runner.cancelRequest(requestCancel[1]));return;}
       const match=pathname.match(/^\/api\/agents\/jobs\/([\w-]{1,80})(\/cancel)?$/);

@@ -1,4 +1,4 @@
-import {runner,isLocal} from './agent-client.js?v=0.12.0';
+import {runner,isLocal} from './agent-client.js?v=0.13.0';
 
 const ROOT='/api/agents/development';
 const identifier=value=>{if(!/^[\w-]{1,80}$/.test(value||''))throw new Error('프로젝트 또는 실행 기록의 ID가 올바르지 않습니다.');return encodeURIComponent(value);};
@@ -30,7 +30,7 @@ export class DevelopmentClient{
   launch(projectId,releaseId,requestId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/launch',{method:'POST',body:requestId?{requestId}:{},timeoutMs:0});}
   stop(projectId,releaseId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/stop',{method:'POST',body:{}});}
   async download(projectId,releaseId){
-    const path=ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/download';
+    const path=ROOT+'/'+identifier(projectId)+(releaseId?'/releases/'+identifier(releaseId)+'/download':'/source');
     const fetchBlob=()=>this.runner.fetcher(this.runner.base+path,{headers:{'X-Agent-Desk':'agent-runner',Authorization:'Bearer '+this.runner.token},cache:'no-store'});
     let response=await fetchBlob();
     if(response.status===401){await this.runner.refresh();response=await fetchBlob();}

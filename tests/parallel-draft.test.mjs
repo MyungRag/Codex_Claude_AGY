@@ -16,7 +16,7 @@ class Agents{
   assert.ok(![...this.jobs.values()].some(j=>j.agent===input.agent&&!j.settled),'one active call per provider');
   const job={id:randomUUID(),agent:input.agent,kind:input.kind,status:'running',startedAt:new Date().toISOString(),context:input.context},payload=JSON.parse(input.prompt);this.jobs.set(job.id,job);this.calls.push({...input,payload});
   this.maxActive=Math.max(this.maxActive,[...this.jobs.values()].filter(j=>!j.settled).length);
-  job.done=(async()=>{await delay(40);try{job.result=await this.handler(input,payload);job.status='succeeded';job.usage={inputTokens:10,outputTokens:5,totalTokens:15};}catch(error){job.status='failed';job.error=error.message;}finally{job.finishedAt=new Date().toISOString();job.settled=true;}})();return this.get(job.id);
+  job.done=(async()=>{await delay(40);try{job.result=await this.handler(input,payload);job.status='succeeded';job.usage={inputTokens:10,outputTokens:5,totalTokens:15};}catch(error){job.status='failed';job.error=error.message;job.errorCode=error.code;}finally{job.finishedAt=new Date().toISOString();job.settled=true;}})();return this.get(job.id);
  }
  get(id){const {done,...job}=this.jobs.get(id);return job;}
  cancel(id){const job=this.jobs.get(id);if(job){job.status='cancelled';job.settled=true;}return job;}
@@ -71,9 +71,9 @@ test('real failed core checks cannot be turned into a runnable release by AI app
  const {runtime,agents,finish}=await setup(t);runtime.workspace.check=async()=>[{id:'core',label:'Core regression',passed:false,exitCode:1,output:'Wrong calculation'}];const state=await finish();assert.equal(state.latestRunnableId,null);assert.ok(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='two'));assert.ok(state.tasks.some(t=>t.isAssembly));
 });
 
-test('an unavailable independent reviewer falls back once to explicitly labeled self-review',async t=>{
+test('an unavailable reviewer uses the third independent AI before the author',async t=>{
  const {agents,finish}=await setup(t,{ids:['one'],config:{strategy:'integrated',roles:{builder:'codex',auditor:'claude',challenger:'agy'}},handler:(request)=>{if(request.kind==='development-audit'&&request.agent==='claude')throw new Error('Reviewer unavailable');}});
- const state=await finish();assert.equal(state.tasks[0].status,'passed');assert.equal(state.tasks[0].audit.mode,'self');assert.ok(state.events.some(e=>e.type==='self-review'));assert.equal(agents.calls.filter(c=>c.kind==='development-audit'&&c.agent==='claude').length,1);assert.ok(state.aiCalls.some(c=>c.agent==='claude'&&c.status==='failed'));assert.ok(state.latestRunnableId);
+ const state=await finish();assert.equal(state.tasks[0].status,'passed');assert.equal(state.tasks[0].audit.mode,'independent');assert.equal(state.tasks[0].auditor,'agy');assert.ok(state.events.some(e=>e.type==='agent-handoff'));assert.equal(agents.calls.filter(c=>c.kind==='development-audit'&&c.agent==='claude').length,1);assert.ok(state.aiCalls.some(c=>c.agent==='claude'&&c.status==='failed'));assert.ok(state.latestRunnableId);
 });
 
 test('cancelling parallel development prevents queued calls from starting and settles every activity record',async t=>{
@@ -157,4 +157,49 @@ test('explicit deferral of draft assembly does not restart it with another provi
 test('HTTP startup alone preserves a draft but does not end the remaining functional recovery attempts',async t=>{
  const {runtime,agents,finish}=await setup(t,{ids:['one'],handler:(request,payload)=>request.kind==='development-audit'?{...audit(payload),verdict:'hold',unverifiedCriteria:['No functional runtime evidence']}:undefined});runtime.workspace.check=async()=>[];
  const state=await finish();assert.ok(state.latestPreviewId);assert.equal(state.releases.at(-1).stage,'draft');assert.equal(agents.calls.filter(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly').length,3);assert.equal(state.releases.at(-1).verification.audit,'incomplete');
+});
+
+
+test('quota handoff resumes the audit stage without rebuilding and persists the error category',async t=>{
+ const {agents,finish}=await setup(t,{ids:['one'],handler:(request,payload)=>{if(request.kind==='development-audit'&&request.agent==='claude')throw Object.assign(new Error('Quota exhausted'),{code:'QUOTA_LIMIT'});}});
+ const state=await finish();assert.equal(agents.calls.filter(c=>c.kind==='development-build').length,1);assert.equal(state.tasks[0].reviewMode,'independent');assert.equal(state.tasks[0].auditor,'agy');assert.ok(state.aiCalls.some(c=>c.errorCode==='QUOTA_LIMIT'));assert.ok(state.latestRunnableId);
+});
+
+test('failed builder hands current request to available lead and skips that provider for the remaining attempt',async t=>{
+ const {agents,input,finish}=await setup(t,{ids:['one'],handler:(request)=>{if(request.agent==='claude')throw Object.assign(new Error('Quota'),{code:'QUOTA_LIMIT'});}});input.handoff.tasks[0].agent='claude';
+ const state=await finish();const builds=agents.calls.filter(c=>c.kind==='development-build');assert.deepEqual(builds.map(c=>c.agent),['claude','codex']);assert.equal(state.tasks[0].builder,'codex');assert.equal(state.attempts[0].unavailable.claude.code,'QUOTA_LIMIT');assert.ok(state.latestRunnableId);
+});
+
+test('automatic handoff can be disabled and does not turn a cancellation into a new request',async t=>{
+ const {agents,finish}=await setup(t,{ids:['one'],config:{autoFailover:false,draftAttempts:1},handler:request=>{if(request.kind==='development-build')throw Object.assign(new Error('Quota'),{code:'QUOTA_LIMIT'});}});
+ const state=await finish();assert.equal(agents.calls.filter(c=>c.kind==='development-build'&&c.payload.task.id==='one').length,1);assert.equal(state.events.filter(e=>e.type==='agent-handoff').length,0);
+});
+
+test('unavailable providers are attempted at most once per request, then independent work ends truthfully',async t=>{
+ const {agents,finish}=await setup(t,{ids:['one'],handler:()=>{throw Object.assign(new Error('Offline'),{code:'AGENT_REQUEST_FAILED'});}});const state=await finish();
+ assert.ok(agents.calls.length<=3);assert.equal(state.tasks[0].status,'limited');assert.equal(state.tasks[0].artifactSha,null);assert.equal(state.sourceAvailable,false);
+});
+
+test('startup repair receives actual failure and adopts a generated launch manifest on the next assembly',async t=>{
+ const {agents,finish,runtime,source}=await setup(t,{ids:['one'],config:{checks:[],draftAttempts:2},handler:(request,payload)=>{
+  if(request.kind==='development-build')return build(payload.task.id,payload.task.id==='draft-assembly'?[{path:'web.html',action:'write',content:'<main><button id="work">Run</button><output>Ready</output><script>document.querySelector("button").onclick=()=>document.querySelector("output").textContent="Works"</script></main>'},{path:'agent-desk.launch.json',action:'write',content:JSON.stringify({kind:'static',entry:'web.html'})}]:[{path:'service.js',action:'write',content:'export const calculate=n=>n*2;'}]);
+ }});await rm(path.join(source,'index.html'));const state=await finish();
+ const repair=agents.calls.find(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly');assert.ok(repair.payload.previousStartupFailure);assert.ok(state.latestPreviewId);const release=state.releases.find(r=>r.id===state.latestPreviewId);assert.equal(release.launch.entry,'web.html');const running=await runtime.launch('parallel',release.id);assert.match(await(await fetch(running.url)).text(),/Works/);
+});
+
+test('exhausted startup repair still provides source and failure evidence without a runnable label',async t=>{
+ const {runtime,source,finish}=await setup(t,{ids:['one'],config:{checks:[],draftAttempts:1}});await rm(path.join(source,'index.html'));const state=await finish();assert.equal(state.latestPreviewId,null);assert.equal(state.sourceAvailable,true);assert.ok(state.lastPreviewFailure);
+ const archive=await runtime.downloadSource('parallel');assert.equal(archive.readUInt32LE(0),0x04034b50);assert.ok(archive.includes(Buffer.from('one.js')));assert.ok(archive.includes(Buffer.from('_agent_desk_records.json')));assert.equal(archive.includes(Buffer.from('start-agent-desk-windows.cmd')),false);
+});
+
+test('handoff uses an available provider when the preferred lead is busy, and keeps cancellation final',async t=>{
+ const {runtime,agents,input}=await setup(t,{ids:['one'],handler:(request,payload)=>{if(request.agent==='agy')throw Object.assign(new Error('Timed out'),{code:'AGENT_TIMEOUT'});}});
+ const state=await runtime._load('parallel'),attempt={id:'direct',input:{...input,agentSettings:{}},roles:input.config.roles},operation={controller:new AbortController(),jobs:new Set()},task={id:'one',builder:'agy',authors:[],status:'running'};
+ runtime.providerQueues.set('codex',new Promise(()=>{}));try{await runtime._ai(state,attempt,operation,'agy','development-build',{role:'Builder',task:{id:'one'}},task);}finally{runtime.providerQueues.delete('codex');}
+ assert.deepEqual(agents.calls.map(c=>c.agent),['agy','claude']);assert.equal(task.builder,'claude');assert.equal(state.aiCalls[0].errorCode,'AGENT_TIMEOUT');
+ operation.controller.abort();await assert.rejects(runtime._ai(state,attempt,operation,'codex','development-build',{role:'Builder',task:{id:'one'}},task),{name:'AbortError'});assert.equal(agents.calls.length,2);
+});
+
+test('self review is the final fallback only after both independent providers fail',async t=>{
+ const {finish}=await setup(t,{ids:['one'],handler:request=>{if(request.kind==='development-audit'&&request.agent!=='codex')throw Object.assign(new Error('quota'),{code:'QUOTA_LIMIT'});}});const state=await finish();assert.equal(state.tasks[0].reviewMode,'self');assert.equal(state.tasks[0].audit.agent,'codex');assert.equal(state.aiCalls.filter(c=>c.kind==='development-audit'&&c.status==='failed').length,2);assert.ok(state.events.some(e=>e.type==='self-review'));
 });

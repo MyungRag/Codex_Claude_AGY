@@ -1,7 +1,7 @@
-import {parsePlanningDraft} from './planning-intake-core.js?v=0.12.0';
-import {changePlan,addNode,layoutPlan,appendMessage} from './planning-model.js?v=0.12.0';
-import {addDecision} from './decision-model.js?v=0.12.0';
-import {reviewPlanContext} from './review-context.js?v=0.12.0';
+import {parsePlanningDraft} from './planning-intake-core.js?v=0.13.0';
+import {changePlan,addNode,layoutPlan,appendMessage} from './planning-model.js?v=0.13.0';
+import {addDecision} from './decision-model.js?v=0.13.0';
+import {reviewPlanContext} from './review-context.js?v=0.13.0';
 const ensure=(ok,message)=>{if(!ok)throw new Error(message);};
 export function validateIntake(plan,raw,{targetId=plan.rootId,promoteIds=[]}={}){
  const draft=parsePlanningDraft(raw),existing=new Set(plan.nodes.map(n=>n.id)),fresh=new Set(draft.nodes.map(n=>n.id)),all=new Set([...existing,...fresh]);

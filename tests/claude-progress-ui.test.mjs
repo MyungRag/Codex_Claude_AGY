@@ -15,7 +15,7 @@ test('Sonnet 5.5 Max stays selectable, chosen wait limit persists, and the live 
  for(const k of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[k]=k==='window'?window:window[k];globalThis.fetch=(url,opts)=>nativeFetch(new URL(url,base),opts);
  t.after(async()=>{window.close();globalThis.fetch=nativeFetch;await service.close();await new Promise(r=>server.close(r));});
  window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
- const {openConnections}=await import('../public/agent-ui.js?v=0.12.0');await openConnections();
+ const {openConnections}=await import('../public/agent-ui.js?v=0.13.0');await openConnections();
  const $=s=>document.querySelector(s),click=s=>$(s).click(),change=(s,value)=>{$(s).value=value;$(s).dispatchEvent(new window.Event('change',{bubbles:true}));};
  assert.equal($('[data-wait-select="claude"]').value,'0');assert.match($('[data-wait-select="claude"]').selectedOptions[0].textContent,/무제한/);
  click('[data-model-load="claude"]');await until(()=>$('.agent-error').textContent.includes('목록을 불러왔'));
@@ -29,6 +29,6 @@ test('Sonnet 5.5 Max stays selectable, chosen wait limit persists, and the live 
  change('[data-model-select="claude"]','claude-sonnet-4-6');assert.ok(![...$('[data-effort-select="claude"]').options].some(o=>o.value==='xhigh'));assert.equal($('[data-effort-select="claude"]').value,'max');
  change('[data-wait-select="claude"]','5');click('[data-ac="save-model"][data-agent="claude"]');assert.equal(JSON.parse(localStorage.getItem('agent-desk-models')).claude.waitMinutes,5);
  click('[data-model-reset="claude"]');assert.equal($('[data-wait-select="claude"]').value,'0');
- const {jobProgressText}=await import('../public/model-controls.js?v=0.12.0');assert.match(jobProgressText({startedAt:new Date().toISOString(),elapsedMs:420000,timeoutMs:0,status:'running'}),/경과 7분 0초 \/ 대기 무제한/);
+ const {jobProgressText}=await import('../public/model-controls.js?v=0.13.0');assert.match(jobProgressText({startedAt:new Date().toISOString(),elapsedMs:420000,timeoutMs:0,status:'running'}),/경과 7분 0초 \/ 대기 무제한/);
  click('[data-ac="close"]');
 });

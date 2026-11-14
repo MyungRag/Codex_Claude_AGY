@@ -124,3 +124,17 @@ test('automatic checks execute all test files, including integration tests along
  const f=await fixture(t),w=await f.create();await f.workspace.apply(w,[{path:'agent-desk.test.mjs',action:'write',content:"import {test} from 'node:test';test('unit',()=>{});"},{path:'integration.test.mjs',action:'write',content:"import {test} from 'node:test';import assert from 'node:assert/strict';test('integration',()=>assert.fail('integration really ran'));"}]);await f.workspace.commit(w);
  const checks=await f.workspace.automaticChecks(w,{kind:'static',entry:'index.html'});assert.ok(checks.some(c=>!c.passed&&c.output.includes('integration really ran')));
 });
+
+test('generated command launch manifest builds only in a launch copy and proves real HTTP startup',async t=>{
+ const f=await fixture(t),manifest={kind:'command',command:{command:'node',args:['server.mjs']},url:'http://127.0.0.1:{port}/',prepare:[{command:'node',args:['build.mjs']}]};
+ await writeFile(path.join(f.source,'agent-desk.launch.json'),JSON.stringify(manifest));
+ await writeFile(path.join(f.source,'build.mjs'),"import{writeFileSync}from'node:fs';writeFileSync('built.html','<h1>Built app</h1>');");
+ await writeFile(path.join(f.source,'server.mjs'),"import{createServer}from'node:http';import{readFileSync}from'node:fs';createServer((q,r)=>r.end(readFileSync('built.html'))).listen(Number(process.env.PORT),'127.0.0.1');");
+ const w=await f.create(),resolved=await f.workspace.resolveLaunch(w,{kind:'static',entry:'index.html'});assert.equal(resolved.launch.kind,'command');const launch=await f.workspace.launch(w.path,resolved.launch);t.after(()=>launch.stop());assert.match(await(await fetch(launch.url)).text(),/Built app/);await assert.rejects(readFile(path.join(w.path,'built.html')),{code:'ENOENT'});
+});
+
+test('raw TypeScript static entry is rejected with actionable build evidence',async t=>{
+ const f=await fixture(t);await writeFile(path.join(f.source,'index.html'),'<script type="module" src="/src/main.tsx"></script>');const w=await f.create();await assert.rejects(f.workspace.resolveLaunch(w,{kind:'static',entry:'index.html'}),/TypeScript\/JSX/);
+});
+
+test('nested static entry keeps relative assets reachable and a missing entry names the actionable file',async t=>{const f=await fixture(t);await mkdir(path.join(f.source,'public'));await writeFile(path.join(f.source,'public/index.html'),'<script src="main.js"></script>');await writeFile(path.join(f.source,'public/main.js'),'globalThis.ready=true');const w=await f.create(),{launch}=await f.workspace.resolveLaunch(w,{kind:'static',entry:'index.html'}),server=await f.workspace.launch(w.path,launch);t.after(()=>server.stop());assert.match(server.url,/public\/index.html$/);assert.match(await(await fetch(new URL('main.js',server.url))).text(),/ready=true/);await assert.rejects(f.workspace.launch(w.path,{kind:'static',entry:'missing.html'}),/시작 파일이 없습니다: missing.html/);});
