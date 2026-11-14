@@ -1,11 +1,13 @@
-import {developmentClient} from './development-client.js?v=0.10.0';
-import {executionMapHTML} from './execution-map.js?v=0.10.0';
-import {executionOrder,executionWaves,normalizeExecutionMeta} from './execution-order.js?v=0.10.0';
-import {decisionWorkspace,decisionCount,handleDecisionClick,handleDecisionSubmit,decisionInput} from './decision-ui.js?v=0.10.0';
-import {openOrganizer} from './organize-ui.js?v=0.10.0';
-import {openConnections,openAgentReview,paintConnections} from './agent-ui.js?v=0.10.0';
-import {runner} from './agent-client.js?v=0.10.0';
-import {AGENTS,NODE_WIDTH,NODE_HEIGHT,validatePlan,createPlan,createDemo,changePlan,travelHistory,addNode,editNode,removeNode,moveUnder,mergeFields,mergeNodes,layoutPlan,visibleNodes,childrenOf,descendants,nodeSources,similarPairs,parseProposals,importProposals,appendMessage,reviewPrompt} from './planning-model.js?v=0.10.0';
+import {openPlanningIntake} from './planning-intake-ui.js?v=0.11.0';
+import {applyIntake} from './planning-intake-model.js?v=0.11.0';
+import {developmentClient} from './development-client.js?v=0.11.0';
+import {executionMapHTML} from './execution-map.js?v=0.11.0';
+import {executionOrder,executionWaves,normalizeExecutionMeta} from './execution-order.js?v=0.11.0';
+import {decisionWorkspace,decisionCount,handleDecisionClick,handleDecisionSubmit,decisionInput} from './decision-ui.js?v=0.11.0';
+import {openOrganizer} from './organize-ui.js?v=0.11.0';
+import {openConnections,openAgentReview,paintConnections} from './agent-ui.js?v=0.11.0';
+import {runner} from './agent-client.js?v=0.11.0';
+import {AGENTS,NODE_WIDTH,NODE_HEIGHT,validatePlan,createPlan,createDemo,changePlan,travelHistory,addNode,editNode,removeNode,moveUnder,mergeFields,mergeNodes,layoutPlan,visibleNodes,childrenOf,descendants,nodeSources,similarPairs,parseProposals,importProposals,appendMessage,reviewPrompt} from './planning-model.js?v=0.11.0';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statuses={draft:'초안',review:'결정 필요',confirmed:'확정'};
 const time=value=>new Intl.DateTimeFormat('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
@@ -16,7 +18,7 @@ export function mountPlanner(root,options){return new Planner(root,options);}
 class Planner {
   constructor(root,{project,revision,save,toast,icon,exportProject}){
     Object.assign(this,{root,project,revision,save,toast,icon,exportProject});
-    this.developmentState={tasks:[],aiCalls:[]};this.fullDevelopmentMap=false;this.developmentFocus=null;this.page='board';this.decisionDirty=false;this.plan=validatePlan(project.planning);this.selected=this.plan?.rootId||null;this.tab='content';this.mode='graph';this.scale=.8;this.collapsed=new Set();this.chosen=new Set();this.multiselect=false;this.editing=false;this.dirty=false;this.drafts=new Map();this.chatTarget=null;this.filter='all';this.fitNext=true;this.saving=false;this.stale=false;
+    this.developmentState={tasks:[],aiCalls:[]};this.fullDevelopmentMap=false;this.developmentFocus=null;this.page='board';this.decisionDirty=false;this.plan=validatePlan(project.planning);this.selected=this.plan?.rootId||null;this.tab='content';this.mode='graph';this.scale=.8;this.manualLayout=false;this.collapsed=new Set(this.plan?.nodes.filter(n=>n.id!==this.plan.rootId&&childrenOf(this.plan,n.id).length).map(n=>n.id)||[]);this.chosen=new Set();this.multiselect=false;this.editing=false;this.dirty=false;this.drafts=new Map();this.chatTarget=null;this.filter='all';this.fitNext=true;this.saving=false;this.stale=false;
     this.click=e=>{const node=e.target.closest('[data-map-node]');if(node){this.developmentFocus=node.dataset.mapNode;this.render();return;}if(e.target.closest('[data-map-full]')){this.fullDevelopmentMap=!this.fullDevelopmentMap;this.render();return;}this.onClick(e);};this.submit=e=>this.onSubmit(e);this.input=e=>this.onInput(e);this.pointer=e=>this.onPointerDown(e);this.key=e=>this.onKey(e);
     root.addEventListener('click',this.click);root.addEventListener('submit',this.submit);root.addEventListener('input',this.input);root.addEventListener('change',this.input);root.addEventListener('pointerdown',this.pointer);root.addEventListener('keydown',this.key);
     this.unload=e=>{if(this.hasDraft()){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',this.unload);
@@ -45,21 +47,22 @@ class Planner {
       <div class="planner-connections"><div>${AGENTS.map(a=>`<span class="connection">${badge(a)}<small data-connection="${a.id}">연결 확인 전</small><small data-agent-tokens="${a.id}">토큰 —</small></span>`).join('')}</div><span>${plan?.demo?'<b class="demo-label">KAF 시연 데이터</b>':'AI 제안 · 직접 편집'} · ${plan?'브라우저에 저장됨 · 변경 '+plan.changeNumber:'아직 시작하지 않음'}</span></div>
       <div class="planner-alert" role="status">${this.stale?'다른 탭에서 정보가 변경되었습니다. 새로고침 후 이어서 편집해 주세요.':''}</div>
       ${plan?`<div class="planner-workspace"><div class="planner-board"><div class="board-toolbar"><div class="board-tabs" aria-label="기획 보기">${button('mode-graph','통합 기획도',`class="${this.mode==='graph'?'active':''}" aria-pressed="${this.mode==='graph'}"`)}${button('mode-execution','구현 순서',`class="${this.mode==='execution'?'active':''}" aria-pressed="${this.mode==='execution'}"`)}${button('mode-live','개발 진행',`class="${this.mode==='live'?'active':''}" aria-pressed="${this.mode==='live'}"`)}${button('mode-compare','에이전트별 비교',`class="${this.mode==='compare'?'active':''}" aria-pressed="${this.mode==='compare'}"`)}</div><div class="board-tools">${button('undo',this.icon('back'),`title="되돌리기" aria-label="되돌리기" ${!plan.undo.length?'disabled':''}`)}${button('redo',this.icon('arrow'),`title="다시 실행" aria-label="다시 실행" ${!plan.redo.length?'disabled':''}`)}${button('history',this.icon('clock'),'title="변경 이력" aria-label="변경 이력"')}${button('layout',this.icon('grid'),'title="자동 정렬" aria-label="자동 정렬"')}</div></div>
-      <div class="board-subtoolbar"><span><strong>${n}</strong>개 노드 · <strong>${plan.nodes.filter(n=>nodeSources(plan,n.id).length>1).length}</strong>개 공동 제안</span><div>${button('candidates','유사 노드 '+similarPairs(plan).length,`class="text-button"`)}${button('select-all','전체 선택','class="text-button"')}${button('organize','AI로 노드 정리','class="text-button"')}${button('multi',this.multiselect?'선택 마치기':'여러 노드 선택',`class="text-button ${this.multiselect?'active':''}"`)}${button('add-root','+ 노드 추가','class="text-button"')}</div></div>
-      ${this.mode==='live'?`<div data-planning-development>${executionMapHTML(this.plan,this.developmentState,this.developmentFocus,this.fullDevelopmentMap)}</div>`:this.mode==='graph'?this.graphHTML():this.mode==='execution'?this.executionHTML():this.compareHTML()}
+      <div class="board-subtoolbar"><span><strong>${n}</strong>개 노드 · <strong>${plan.nodes.filter(n=>nodeSources(plan,n.id).length>1).length}</strong>개 공동 제안</span><div>${button('overview','주요 기능만','class="text-button"')}${button('expand-all','전체 펼치기','class="text-button"')}${button('candidates','유사 노드 '+similarPairs(plan).length,`class="text-button"`)}${button('select-all','전체 선택','class="text-button"')}${button('organize','AI로 노드 정리','class="text-button"')}${button('multi',this.multiselect?'선택 마치기':'여러 노드 선택',`class="text-button ${this.multiselect?'active':''}"`)}${button('add-root','+ 노드 추가','class="text-button"')}</div></div>
+      <details class="backlog-on-board"><summary>후속 기능 ${plan.backlog.filter(b=>b.status==='later').length}개 · 현재 실행에서 제외</summary>${plan.backlog.filter(b=>b.status==='later').map(b=>`<p><strong>${esc(b.title)}</strong> · ${esc(b.reason)}</p>`).join('')}${button('page-backlog','후속 기능 관리 →','class="text-button"')}</details>${this.mode==='live'?`<div data-planning-development>${executionMapHTML(this.plan,this.developmentState,this.developmentFocus,this.fullDevelopmentMap)}</div>`:this.mode==='graph'?this.graphHTML():this.mode==='execution'?this.executionHTML():this.compareHTML()}
       <div class="board-bottom"><span>${this.multiselect?`${this.chosen.size}개 선택됨 · 합칠 노드를 선택하세요`:this.mode==='execution'?'선행 작업 완료가 우선 · 목록의 노드를 눌러 상세 보기':'노드를 끌어 이동 · 연결선의 +로 추가 · 노드를 눌러 상세 보기'}</span>${this.multiselect?button('merge','선택 노드 합치기',`class="button primary compact" ${this.chosen.size<2?'disabled':''}`):this.mode==='graph'?`<div class="zoom-tools">${button('zoom-out','−','aria-label="축소"')}<span>${Math.round(this.scale*100)}%</span>${button('zoom-in','+','aria-label="확대"')}${button('fit','화면에 맞추기')}</div>`:''}</div></div><aside class="plan-inspector">${this.inspectorHTML()}</aside></div>
       <div class="planner-footnote">${this.icon('info')}${plan.demo?'시연 데이터는 편집 체험을 위한 예시이며 실제 AI 응답이 아닙니다.':'AI 기획 요청으로 의견을 받아 확인 후 반영하세요. 반영한 의견은 다음 요청에도 전달됩니다.'} ${button('prompt','검토 요청문 복사','class="text-button"')}</div>`:this.welcomeHTML()}</section>`;
-    if(plan){const nav=`<nav class="planning-pages" aria-label="기획 단계">${button('page-board','기획도',`class="${this.page==='board'?'active':''}"`)}${button('page-decisions','질문·결정 '+decisionCount(plan),`class="${this.page==='decisions'?'active':''}"`)}${button('page-finalize','기획 확정 · 업무 분담',`class="${this.page==='finalize'?'active':''}"`)}${button('export','다른 PC로 옮길 백업','class="text-button"')}</nav>`;this.root.querySelector('.planner-alert').insertAdjacentHTML('afterend',nav);if(this.page!=='board'){this.root.querySelector('.planner-workspace').outerHTML=`<div class="decision-history">${button('undo','↶ 되돌리기',`class="button" ${!plan.undo.length?'disabled':''}`)}${button('redo','↷ 다시 실행',`class="button" ${!plan.redo.length?'disabled':''}`)}${button('history','변경 이력','class="text-button"')}</div>`+decisionWorkspace(this);this.root.querySelector('.planner-footnote')?.remove();}}
+    if(plan){const nav=`<nav class="planning-pages" aria-label="기획 단계">${button('page-board','기획도',`class="${this.page==='board'?'active':''}"`)}${button('page-decisions','질문·결정 '+decisionCount(plan),`class="${this.page==='decisions'?'active':''}"`)}${button('page-backlog','후속 기능 '+plan.backlog.filter(b=>b.status==='later').length,`class="${this.page==='backlog'?'active':''}"`)}${button('page-finalize','기획 확정 · 업무 분담',`class="${this.page==='finalize'?'active':''}"`)}${button('export','다른 PC로 옮길 백업','class="text-button"')}</nav>`;this.root.querySelector('.planner-alert').insertAdjacentHTML('afterend',nav);if(this.page!=='board'){this.root.querySelector('.planner-workspace').outerHTML=`<div class="decision-history">${button('undo','↶ 되돌리기',`class="button" ${!plan.undo.length?'disabled':''}`)}${button('redo','↷ 다시 실행',`class="button" ${!plan.redo.length?'disabled':''}`)}${button('history','변경 이력','class="text-button"')}</div>`+(this.page==='backlog'?this.backlogHTML():decisionWorkspace(this));this.root.querySelector('.planner-footnote')?.remove();}}
     paintConnections(this.root);
     if(plan&&this.mode==='graph'&&this.page==='board'){if(this.fitNext){this.fitNext=false;this.fit();}else{this.applyScale();const vp=this.root.querySelector('.graph-viewport');if(scroll){vp.scrollLeft=scroll.left;vp.scrollTop=scroll.top;}}}
   }
   welcomeHTML(){return `<div class="planning-welcome"><div class="planning-illustration" aria-hidden="true"><div class="mini-goal">${this.icon('layers')} 하나의 목표</div><div class="mini-lines"></div><div class="mini-children"><span>아이디어</span><i>+</i><span>구체적인 작업</span><i>+</i><span>완료 기준</span></div></div><span class="eyebrow">START WITH YOUR IDEA</span><h2>아이디어를, 한눈에 보이는 기획으로.</h2><p>프로젝트 설명을 바탕으로 기본 구조를 만들고<br>노드를 직접 편집하거나 세 에이전트의 제안을 가져오세요.</p><blockquote>${esc(this.project.description||'프로젝트 설명이 비어 있습니다. 빈 기획에서 목표를 직접 적을 수 있어요.')}</blockquote><div class="welcome-plan-actions">${button('ai-review','AI와 기획 시작','class="button primary"')}${button('start-template','설명으로 초안 만들기 '+this.icon('arrow'),'class="button primary"')}${button('start-blank','빈 기획 시작','class="button"')}</div><small>기본 초안은 규칙 기반의 편집 틀입니다. AI와 기획 시작은 연결된 CLI에 실제로 요청합니다.</small><div class="planning-demo">${button('start-demo',this.icon('grid')+' KAF 시연으로 기능 둘러보기','class="text-button"')}<span>중복 제안 통합 · 노드 편집 · 에이전트별 비교</span></div></div>`;}
   graphHTML(){
-    const nodes=visibleNodes(this.plan,this.collapsed),visible=new Set(nodes.map(n=>n.id));
+    const display=this.collapsed.size&&!this.manualLayout?structuredClone(this.plan):this.plan;if(this.collapsed.size&&!this.manualLayout)layoutPlan(display,{collapsed:this.collapsed});this.displayPlan=display;
+    const nodes=visibleNodes(display,this.collapsed),visible=new Set(nodes.map(n=>n.id));
     const width=Math.max(680,...nodes.map(n=>n.x+NODE_WIDTH+70)),height=Math.max(400,...nodes.map(n=>n.y+NODE_HEIGHT+100));
     this.graphSize={width,height};
     const edges=this.plan.edges.filter(e=>visible.has(e.from)&&visible.has(e.to)&&!this.collapsed.has(e.from));
-    const lines=edges.map(e=>{const a=this.plan.nodes.find(n=>n.id===e.from),b=this.plan.nodes.find(n=>n.id===e.to),x1=a.x+NODE_WIDTH/2,y1=a.y+NODE_HEIGHT,x2=b.x+NODE_WIDTH/2,y2=b.y;return {...e,x1,y1,x2,y2,mx:(x1+x2)/2,my:(y1+y2)/2};});
+    const lines=edges.map(e=>{const a=display.nodes.find(n=>n.id===e.from),b=display.nodes.find(n=>n.id===e.to),x1=a.x+NODE_WIDTH/2,y1=a.y+NODE_HEIGHT,x2=b.x+NODE_WIDTH/2,y2=b.y;return {...e,x1,y1,x2,y2,mx:(x1+x2)/2,my:(y1+y2)/2};});
     return `<div class="graph-viewport" tabindex="0" aria-label="기획 노드 캔버스"><div class="graph-space"><div class="graph-world" style="width:${width}px;height:${height}px"><svg class="graph-edges" width="${width}" height="${height}" aria-hidden="true"><defs><marker id="plan-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 6 3 0 6" fill="none" stroke="#607d6b"/></marker></defs>${lines.map(e=>`<path data-from="${e.from}" data-to="${e.to}" d="M${e.x1},${e.y1} C${e.x1},${e.my} ${e.x2},${e.my} ${e.x2},${e.y2-6}" marker-end="url(#plan-arrow)"/>`).join('')}</svg>${lines.map(e=>button('edge-add','+',`class="edge-add" style="left:${e.mx-13}px;top:${e.my-13}px" data-from="${e.from}" data-to="${e.to}" aria-label="${esc(this.plan.nodes.find(n=>n.id===e.from).title)}와 ${esc(this.plan.nodes.find(n=>n.id===e.to).title)} 사이에 노드 추가"`)).join('')}${nodes.map(node=>this.nodeHTML(node)).join('')}</div></div>${nodes.length===1?'<div class="canvas-hint">목표 아래의 +를 눌러 첫 번째 작업을 추가하세요.</div>':''}</div>`;
   }
   nodeHTML(node){const root=node.id===this.plan.rootId,agents=nodeSources(this.plan,node.id),count=childrenOf(this.plan,node.id).length,comments=this.plan.messages.filter(m=>m.nodeId===node.id).length;
@@ -113,32 +116,30 @@ class Planner {
     this.agentDialogOpen=true;
     await openOrganizer({project:this.project,plan:this.plan,selectedIds,onClose:()=>{this.agentDialogOpen=false;},onApply:async(next,baseChange)=>{
       if(this.stale||this.plan.changeNumber!==baseChange)throw new Error('기획이 변경되었습니다. 현재 내용을 확인한 뒤 다시 정리해 주세요.');
-      if(!await this.persist(next,()=>{this.chosen.clear();this.collapsed.clear();this.multiselect=false;this.selected=next.rootId;this.tab='content';this.mode='graph';this.fitNext=true;this.toast('AI 정리안을 적용했습니다. 되돌리기로 복원할 수 있습니다.');}))throw new Error('기획을 저장하지 못했습니다. 응답은 유지됩니다.');
+      if(!await this.persist(next,()=>{this.chosen.clear();this.collapsed=new Set(next.nodes.filter(n=>n.id!==next.rootId&&childrenOf(next,n.id).length).map(n=>n.id));this.multiselect=false;this.selected=next.rootId;this.tab='content';this.mode='graph';this.fitNext=true;this.toast('AI 정리안을 적용했습니다. 되돌리기로 복원할 수 있습니다.');}))throw new Error('기획을 저장하지 못했습니다. 응답은 유지됩니다.');
     }});
   }
-  async requestAI(targetId=null){
-    if(this.hasDraft()){this.toast('작성 중인 의견과 수정 내용을 먼저 저장해 주세요.');return;}
+  async requestAI(targetId=null,promoteIds=[]){
+    if(this.hasDraft()){this.toast('작성 중인 내용을 먼저 저장해 주세요.');return;}
     if(!this.plan){const initial=createPlan(this.project);if(!await this.persist(initial,()=>{this.selected=initial.rootId;}))return;}
     this.agentDialogOpen=true;
-    await openAgentReview({project:this.project,plan:this.plan,targetId,onClose:()=>{this.agentDialogOpen=false;},onApply:async(jobs,target,instruction)=>{
-      if(this.stale)throw new Error('다른 탭에서 기획이 변경되었습니다. 응답은 임시 보관됩니다. 창을 닫고 새로고침한 뒤 AI 기획 요청을 다시 여세요.');
-      if(target&&!this.plan.nodes.some(n=>n.id===target))throw new Error('요청 대상 노드가 삭제되었습니다. 응답을 비우고 다시 요청해 주세요.');
-      const next=changePlan(this.plan,'실제 AI 의견과 노드 반영',p=>{
-        p.appliedRuns??=[];
-        if(instruction?.trim()&&jobs.some(job=>!p.appliedRuns.includes(job.id)))appendMessage(p,{nodeId:target,text:instruction});
-        for(const job of jobs){if(p.appliedRuns.includes(job.id))continue;
-          if(job.result.nodes.length)importProposals(p,job.agent,job.result.nodes,'live',target||p.rootId);
-          if(job.result.summary)appendMessage(p,{nodeId:target,author:job.agent,text:job.result.summary,kind:'live'});
-          p.appliedRuns.push(job.id);
-        }
-        p.appliedRuns=p.appliedRuns.slice(-300);layoutPlan(p);
-      });
-      if(!await this.persist(next,()=>{this.fitNext=true;this.tab='chat';this.chatTarget=target;this.toast('AI 의견과 제안을 기획에 반영했습니다.');}))throw new Error('기획을 저장하지 못했습니다. 응답은 유지됩니다. 저장 오류를 해결한 뒤 다시 반영하세요.');
+    await openPlanningIntake({project:this.project,plan:this.plan,targetId:targetId||this.plan.rootId,promoteIds,onClose:()=>{this.agentDialogOpen=false;},onApply:async pending=>{
+      if(this.stale||this.plan.changeNumber!==pending.baseChange)throw new Error('기획이 변경되었습니다. 현재 기획으로 다시 요청해 주세요.');
+      const next=applyIntake(this.plan,pending.final.result,{targetId:pending.targetId,promoteIds:pending.promoteIds,id:pending.final.id,lead:pending.lead,agents:pending.agents,instruction:pending.instruction,answers:pending.answers,allowRequired:pending.allowRequired,reviews:pending.reviews});
+      if(!await this.persist(next,()=>{this.page='board';this.mode='graph';this.selected=next.rootId;this.collapsed=new Set(next.nodes.filter(n=>n.id!==next.rootId&&childrenOf(next,n.id).length).map(n=>n.id));this.fitNext=true;this.toast('초안·기본값·후속 후보를 저장했습니다.');}))throw new Error('기획을 저장하지 못했습니다. 응답을 보관합니다.');
     }});
+  }
+  backlogHTML(){
+    const pending=this.plan.backlog.filter(b=>b.status==='later'),last=this.plan.intakeHistory[0];
+    return `<section class="planning-backlog"><header><div><span class="eyebrow">NEXT, WHEN YOU NEED IT</span><h2>후속 기능 보관함</h2><p>현재 개발과 선행 조건에 포함되지 않습니다. 선택하면 주 AI가 붙일 위치와 필요한 작업을 제안합니다.</p></div>${button('promote-backlog','선택한 기능의 편입안 만들기','class="button primary"')}</header>${pending.map(b=>`<article class="backlog-card"><label><input type="checkbox" data-backlog-id="${esc(b.id)}"><strong>${esc(b.title)}</strong></label><p>${esc(b.description)}</p><dl><dt>기대 효과</dt><dd>${esc(b.benefit)}</dd><dt>초안에서 미룬 이유</dt><dd>${esc(b.reason)}</dd><dt>구현 난점·필요 조건</dt><dd>${esc(b.difficulty)} · ${esc(b.conditions)}</dd><dt>추가할 위치</dt><dd>${esc(this.plan.nodes.find(n=>n.id===b.parentId)?.title||'주 AI가 현재 구조에서 재검토')}</dd></dl>${b.required?'<p class="helper">사용자가 이번 초안에서 보류한 필수 요구</p>':''}</article>`).join('')||'<p>보관된 후속 후보가 없습니다. AI 기획에서 초안 범위와 함께 정리합니다.</p>'}<details><summary>이미 기획에 추가한 기능 ${this.plan.backlog.filter(b=>b.status==='added').length}개</summary>${this.plan.backlog.filter(b=>b.status==='added').map(b=>`<p>${esc(b.title)} · ${b.addedNodeIds.map(id=>esc(this.plan.nodes.find(n=>n.id===id)?.title||'삭제·병합된 노드')).join(' / ')}</p>`).join('')}</details>${last?`<details><summary>최근 주 AI의 기획 판단</summary><p>${esc(last.summary)}</p><p>주 AI: ${esc(last.lead)} · 참여: ${last.agents.map(esc).join(' / ')}</p></details>`:''}</section>`;
   }
   async onClick(event){
     if(event.target.closest('[data-dec]')){try{await handleDecisionClick(this,event);}catch(error){this.error(error);}return;}
     const el=event.target.closest('[data-pa]');if(!el||!this.root.contains(el))return;event.preventDefault();const action=el.dataset.pa,id=el.dataset.id;
+    if(action==='promote-backlog'){const ids=[...this.root.querySelectorAll('[data-backlog-id]:checked')].map(e=>e.dataset.backlogId);if(!ids.length){this.toast('추가할 후속 기능을 선택해 주세요.');return;}await this.requestAI(null,ids);return;}
+    if(action==='page-backlog'){if(!this.guard())return;this.page='backlog';this.render();return;}
+    if(action==='overview'){this.manualLayout=false;this.collapsed=new Set(this.plan.nodes.filter(n=>n.id!==this.plan.rootId&&childrenOf(this.plan,n.id).length).map(n=>n.id));this.fitNext=true;this.render();return;}
+    if(action==='expand-all'){this.collapsed.clear();this.fitNext=true;this.render();return;}
     if(this.ignoreClick){this.ignoreClick=false;return;}
     try{
       if(action==='close-modal'){this.closeModal();return;}
@@ -161,7 +162,7 @@ class Planner {
       else if(action==='add-child'||action==='add-root'){this.addDialog(action==='add-root'?this.plan.rootId:id);}
       else if(action==='edge-add'){this.addDialog(el.dataset.from,el.dataset.to);}
       else if(action==='delete'){const node=this.plan.nodes.find(n=>n.id===id),count=descendants(this.plan,id).size;this.modal={type:'delete',id};this.openModal('이 노드를 삭제할까요?',`<p class="plan-dialog-intro"><strong>${esc(node.title)}</strong>을 기획에서 삭제합니다. 변경은 되돌릴 수 있습니다.</p>${count?`<div class="add-choice"><label><input type="radio" name="scope" value="one" checked> 이 노드만 삭제 · 하위 연결 유지</label><label><input type="radio" name="scope" value="all"> 연결된 하위 ${count}개 노드도 함께 삭제</label></div>`:''}`,'<button type="submit" class="button danger">노드 삭제</button>');}
-      else if(action==='collapse'){this.collapsed.has(id)?this.collapsed.delete(id):this.collapsed.add(id);this.render();}
+      else if(action==='collapse'){this.manualLayout=false;this.fitNext=true;this.collapsed.has(id)?this.collapsed.delete(id):this.collapsed.add(id);this.render();}
       else if(action==='multi'){this.multiselect=!this.multiselect;if(!this.multiselect)this.chosen.clear();this.render();}
       else if(action==='merge'){const ids=[...this.chosen];if(ids.length<2)return;this.modal={type:'merge',ids};this.openModal('선택한 노드 합치기',`<p class="plan-dialog-intro">${ids.map(i=>esc(this.plan.nodes.find(n=>n.id===i)?.title)).join(' + ')}<br>원본 제안·대화·연결 관계를 함께 보존합니다. 합칠 내용을 아래에서 수정하세요.</p>${this.fieldsHTML(mergeFields(this.plan,ids))}`,'<button type="submit" class="button primary">합치기 적용</button>');}
       else if(action==='reparent'){this.modal={type:'reparent',id};const excluded=descendants(this.plan,id);excluded.add(id);this.openModal('상위 노드 변경',`<p class="plan-dialog-intro">선택한 노드의 기존 상위 연결을 아래 노드로 변경합니다. 하위 노드는 함께 이동합니다.</p><div class="plan-form"><label>새 상위 노드<select name="parent">${this.plan.nodes.filter(n=>!excluded.has(n.id)).map(n=>`<option value="${n.id}">${esc(n.title)}</option>`).join('')}</select></label></div>`,'<button type="submit" class="button primary">관계 변경</button>');}
@@ -224,12 +225,12 @@ class Planner {
     const control=event.target.closest('button,input,textarea,select,dialog');
     if(event.button!==0||this.saving||this.dirty||(control&&!control.matches('.node-title')))return;
     const card=event.target.closest('.plan-node'),vp=event.target.closest('.graph-viewport');if(!vp)return;
-    const node=card&&this.plan.nodes.find(n=>n.id===card.dataset.node),start={x:event.clientX,y:event.clientY,left:vp.scrollLeft,top:vp.scrollTop,nx:node?.x,ny:node?.y};let moved=false,lastX,lastY;
+    const node=card&&this.plan.nodes.find(n=>n.id===card.dataset.node),start={x:event.clientX,y:event.clientY,left:vp.scrollLeft,top:vp.scrollTop,nx:card?parseFloat(card.style.left):node?.x,ny:card?parseFloat(card.style.top):node?.y};let moved=false,lastX,lastY;
     const move=e=>{const dx=e.clientX-start.x,dy=e.clientY-start.y;if(Math.abs(dx)+Math.abs(dy)<4&&!moved)return;moved=true;
       if(node){lastX=Math.max(0,Math.min(49000,start.nx+dx/this.scale));lastY=Math.max(0,Math.min(49000,start.ny+dy/this.scale));card.style.left=lastX+'px';card.style.top=lastY+'px';card.classList.add('dragging');this.updateEdgesWhileDragging(node.id,lastX,lastY);}
       else{vp.scrollLeft=start.left-dx;vp.scrollTop=start.top-dy;}
     };
-    const end=async e=>{this.endDrag?.();if(moved){this.ignoreClick=true;setTimeout(()=>{this.ignoreClick=false;},0);}if(e.type==='pointercancel'){if(moved)this.render();return;}if(moved&&node){try{await this.mutate('노드 위치 이동',p=>{const n=p.nodes.find(n=>n.id===node.id);n.x=Math.round(lastX);n.y=Math.round(lastY);});}catch(error){this.error(error);}if(!this.disposed)this.render();}};
+    const end=async e=>{this.endDrag?.();if(moved){this.ignoreClick=true;setTimeout(()=>{this.ignoreClick=false;},0);}if(e.type==='pointercancel'){if(moved)this.render();return;}if(moved&&node){try{this.manualLayout=true;await this.mutate('노드 위치 이동',p=>{for(const displayed of visibleNodes(this.displayPlan||p,this.collapsed)){const item=p.nodes.find(n=>n.id===displayed.id);item.x=displayed.x;item.y=displayed.y;}const n=p.nodes.find(n=>n.id===node.id);n.x=Math.round(lastX);n.y=Math.round(lastY);});}catch(error){this.error(error);}if(!this.disposed)this.render();}};
     this.endDrag=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.removeEventListener('pointercancel',end);this.endDrag=null;};
     document.addEventListener('pointermove',move);document.addEventListener('pointerup',end,{once:true});document.addEventListener('pointercancel',end,{once:true});
   }

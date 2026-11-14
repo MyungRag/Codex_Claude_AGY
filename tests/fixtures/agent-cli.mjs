@@ -37,6 +37,8 @@ if(prompt.includes('정리할 노드 ID:')){const ids=JSON.parse(prompt.match(/�
 if(prompt.includes('fixture:cycle'))output.nodes[0].parentId='search';
 const schemaArg=args.includes('--output-schema')?args[args.indexOf('--output-schema')+1]:args[args.indexOf('--json-schema')+1];
 const schema=JSON.parse(agent==='claude'?schemaArg:await readFile(schemaArg,'utf8'));
+if(schema.properties.defaults){Object.assign(output,{nodes:[{...output.nodes[0],nodeType:'task',dependsOn:[],functionSteps:[]}],defaults:[],deferred:[],promotions:[]});}
+if(schema.properties.strengths){delete output.nodes;Object.assign(output,{strengths:['핵심 기능 유지'],risks:['실제 가격 연동 확인 필요'],changes:['검증 가능한 범위 유지']});}
 if(schema.properties.items){
  const conflict=schema.properties.items.items.properties.type.enum.length===1&&schema.properties.items.items.properties.type.enum[0]==='conflict';
  delete output.nodes;output.items=[{type:conflict?'conflict':'question',nodeIds:['work-a'],relatedIds:conflict?['decision-a','decision-b']:prompt.includes('fixture:wrong-related-ids')?['work-a','invented-decision']:[],question:'어떤 가격을 비교할까요?',reason:'범위 확인',evidence:'사용자 확인 필요',options:[{label:'최종 가격',impact:'세금 포함'}],blocking:true,...(!conflict?{recommendation:{kind:'assumption',answer:'최종 가격',reason:'비교 가능한 최소 기준',messageIds:[]}}:{})}];

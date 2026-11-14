@@ -48,9 +48,9 @@ test('non-Windows keeps browser picking and static routes do not expose source f
 
 test('versioned planner assets and nested module imports are served with correct MIME types',async t=>{
   const {origin}=await listen(t);
-  const html=await (await fetch(origin)).text();assert.match(html,/planning\.css\?v=0\.10\.0/);
+  const html=await (await fetch(origin)).text();assert.match(html,/planning\.css\?v=0\.11\.0/);
   for(const name of ['app.js','model.js','storage.js','planning.js','planning-model.js','planning.css']){
-    const response=await fetch(`${origin}/${name}?v=0.10.0`);
+    const response=await fetch(`${origin}/${name}?v=0.11.0`);
     assert.equal(response.status,200,name);
     assert.match(response.headers.get('content-type'),name.endsWith('.css')?/text\/css/:/javascript/);
     assert.ok((await response.text()).length>100);

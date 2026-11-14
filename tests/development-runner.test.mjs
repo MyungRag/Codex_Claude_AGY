@@ -56,7 +56,7 @@ test('real CLI envelopes build isolated files, run checks, pin independent audit
  const state=await finished(runtime);assert.equal(state.status,'completed');assert.equal(state.tasks[0].status,'passed',JSON.stringify(state));
  assert.match(state.tasks[0].artifactSha,/^[a-f0-9]{40}$/);assert.equal(state.tasks[0].checks[0].passed,true);assert.equal(state.tasks[0].checks[0].codeSha,state.tasks[0].audit.codeSha);
  assert.equal(state.tasks[0].audit.agent,'claude');assert.ok([...agentRunner.jobs.values()].some(job=>job.agent==='agy'&&JSON.parse(job.prompt).role==='overall-lead'));
- const builder=[...agentRunner.jobs.values()].find(job=>job.kind==='development-build');assert.equal(JSON.parse(builder.prompt).baseline.snapshot.items[0].question,'Unknown choice');assert.equal(builder.timeoutMs,0);
+ const builder=[...agentRunner.jobs.values()].find(job=>job.kind==='development-build');assert.equal(JSON.parse(builder.prompt).baseline.snapshot.items[0].question,'Unknown choice');assert.equal(builder.timeoutMs,20*60000);
  assert.equal(await readFile(path.join(source,'original.txt'),'utf8'),'unchanged');await assert.rejects(readFile(path.join(source,'index.html')),{code:'ENOENT'});
  assert.ok(state.latestRunnableId);const launch=await runtime.launch('project-1',state.latestRunnableId);assert.match(await (await fetch(launch.url)).text(),/GOOD/);
  const zip=await runtime.download('project-1',state.latestRunnableId);assert.equal(zip.subarray(0,2).toString(),'PK');

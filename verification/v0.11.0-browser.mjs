@@ -1,0 +1,50 @@
+// Reproducible Chromium UI verification with deterministic CLI responses; no paid AI calls.
+import {spawn} from 'node:child_process';
+import {mkdtemp,mkdir,writeFile,rm,readFile} from 'node:fs/promises';
+import {setTimeout as delay} from 'node:timers/promises';
+import path from 'node:path';
+import os from 'node:os';
+import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
+import {createAppServer} from '../scripts/server.mjs';
+import {AgentRunner} from '../scripts/agent-runner.mjs';
+import {DevelopmentRunner} from '../scripts/development-runner.mjs';
+import {createPlan,addNode} from '../public/planning-model.js';
+import {addDecision,finalizePlan,createAssignments,saveAssignments} from '../public/decision-model.js';
+import {validateProject} from '../public/model.js';
+import {defaultDevelopment} from '../public/development-core.js';
+const repo=fileURLToPath(new URL('../',import.meta.url)),temporary=await mkdtemp(path.join(os.tmpdir(),'agent-monitor-ui-')),source=path.join(temporary,'source');await mkdir(source);
+const fixture=path.join(repo,'tests/fixtures/intake-cli.mjs');
+const agents=new AgentRunner({resolve:async provider=>({command:process.execPath,prefix:[fixture,provider]})}),runtime=new DevelopmentRunner({agentRunner:agents,dataRoot:path.join(temporary,'runs'),pollMs:10}),server=createAppServer({agentRunner:agents,developmentRunner:runtime});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
+const project=validateProject({id:'intake-demo',name:'공학용 계산기',description:'입력한 수식을 계산하는 실행 가능한 초안을 만들어 주세요. 그래프는 나중에 추가할 수 있으면 좋겠습니다.',instructions:'필수 기능과 기본값을 판단하세요.',paths:{current:source},development:{...defaultDevelopment(),strategy:'integrated',limits:{maxRevisions:1,maxReviews:4,maxSwitches:0}}});
+const browser=spawn('/usr/bin/chromium',['--headless=new','--no-sandbox','--disable-gpu','--no-first-run','--no-default-browser-check','--user-data-dir='+path.join(temporary,'browser'),'--remote-debugging-pipe','about:blank'],{stdio:['ignore','ignore','ignore','pipe','pipe']});
+let seq=0,buffer='';const pending=new Map(),errors=[];browser.stdio[4].on('data',chunk=>{buffer+=chunk;let index;while((index=buffer.indexOf('\0'))>=0){let message;try{message=JSON.parse(buffer.slice(0,index));}catch{}buffer=buffer.slice(index+1);if(!message)continue;if(message.method==='Runtime.exceptionThrown')errors.push(message.params.exceptionDetails.exception?.description||message.params.exceptionDetails.text);const p=pending.get(message.id);if(p){pending.delete(message.id);clearTimeout(p.timer);message.error?p.reject(new Error(message.error.message)):p.resolve(message.result);}}});
+const command=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(new Error('CDP timeout '+method));},20000);pending.set(id,{resolve,reject,timer});browser.stdio[3].write(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})})+'\0');});
+const {targetId}=await command('Target.createTarget',{url:origin}),{sessionId}=await command('Target.attachToTarget',{targetId,flatten:true});await command('Runtime.enable',{},sessionId);await command('Page.enable',{},sessionId);
+const evaluate=async expression=>{const r=await command('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId);if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
+const waitFor=async(expression,ms=20000)=>{const end=Date.now()+ms;while(Date.now()<end){if(await evaluate(expression))return;await delay(150);}throw new Error('UI condition timed out: '+expression);};
+const click=selector=>evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+const screenshot=async name=>{const {data}=await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);await writeFile(path.join(repo,'verification',name),Buffer.from(data,'base64'));};
+try{
+ await command('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false},sessionId);await waitFor('document.querySelector("#project-grid")');
+ await evaluate(`(async()=>{const store=await import('/storage.js?v=0.11.0');await store.openStore();const state=await store.readState();await store.saveState({...state,projects:[${JSON.stringify(project)}]},state.revision);location.hash='#intake-demo/planning';location.reload();})()`);
+ await waitFor('document.querySelector("[data-pa=ai-review]")');await click('[data-pa=ai-review]');await waitFor('document.querySelector("[data-intake-form]")');
+ await evaluate(`for(const agent of ['claude','agy']){const checkbox=document.querySelector('[name=agents][value='+agent+']');checkbox.checked=true;checkbox.dispatchEvent(new Event('change',{bubbles:true}));}`);await screenshot('intake-setup-desktop.png');
+ await click('[data-intake-form] button[type=submit]');await waitFor('document.querySelector("[data-intake=monitor]")');await click('[data-intake=monitor]');await waitFor('document.querySelector(".execution-monitor")');
+ await evaluate("location.hash='#intake-demo/planning'");await waitFor('document.querySelector("[data-pa=ai-review]")');await click('[data-pa=ai-review]');await waitFor('document.querySelector("[data-intake=apply]") && !document.querySelector("[data-intake=apply]").disabled',40000);await screenshot('intake-result-desktop.png');await click('[data-intake=apply]');await waitFor('!document.querySelector(".agent-dialog")');
+ assert.equal(await evaluate('document.querySelectorAll(".plan-node").length'),3,'root and two primary branches are initially visible');await screenshot('intake-overview-desktop.png');
+ await click('[data-pa=page-backlog]');await waitFor('document.querySelector(".backlog-card")');await screenshot('intake-backlog-desktop.png');await click('[data-backlog-id]');await click('[data-pa=promote-backlog]');await waitFor('document.querySelector("[data-intake-form]")');await click('[data-intake-form] button[type=submit]');await waitFor('document.querySelector("[data-intake=apply]") && !document.querySelector("[data-intake=apply]").disabled',40000);await screenshot('intake-promotion-desktop.png');await click('[data-intake=apply]');await waitFor('!document.querySelector(".agent-dialog")');
+ assert.equal(await evaluate(`(async()=>{const s=await import('/storage.js?v=0.11.0');return (await s.readState()).projects[0].planning.backlog[0].status;})()`),'added');
+ await click('[data-pa=undo]');await waitFor(`document.querySelector('.backlog-on-board')?.textContent.includes('후속 기능 1개')`);
+ // Freeze the core plan through the same domain operations used by the finalization UI.
+ await evaluate(`(async()=>{const store=await import('/storage.js?v=0.11.0'),model=await import('/decision-model.js?v=0.11.0');const state=await store.readState(),project=state.projects[0];let plan=model.finalizePlan(project,project.planning);const baseline=plan.baselines.at(-1);plan=model.saveAssignments(plan,baseline.id,model.createAssignments(baseline));await store.saveState({...state,projects:[{...project,planning:plan}]},state.revision);location.hash='#intake-demo/development';location.reload();})()`);
+ await waitFor('document.querySelector("[data-dev=start]") && !document.querySelector("[data-dev=start]").disabled');await click('[data-dev=start]');await click('[data-dev=page][data-page=activity]');await waitFor('document.querySelectorAll(".agent-station.is-running").length>=2',40000);await screenshot('intake-development-parallel.png');
+ const end=Date.now()+120000;let result;while(Date.now()<end){result=await runtime.get('intake-demo');if(result.status==='completed')break;await delay(500);}assert.equal(result.status,'completed');assert.ok(result.latestRunnableId,JSON.stringify(result.tasks.map(t=>({title:t.title,status:t.status,error:t.error}))));assert.ok(result.tasks.every(t=>t.status==='passed'),JSON.stringify(result.tasks.map(t=>({title:t.title,status:t.status,error:t.error}))));
+ await click('[data-dev=page][data-page=preview]');await waitFor('document.querySelector("[data-dev=launch]")');await click('[data-dev=launch]');await waitFor('document.querySelector("iframe.program-preview")');await screenshot('intake-program-preview.png');
+ assert.ok(result.releases.at(-1).verification.checks.some(c=>c.label.includes('sin(30)')&&c.passed),'actual browser calculation check must pass');
+ await command('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true},sessionId);await evaluate("location.hash='#intake-demo/planning'");await waitFor('document.querySelector("[data-pa=page-backlog]")');await click('[data-pa=page-backlog]');await evaluate("document.querySelector('.planning-backlog').scrollIntoView({block:'start'})");await screenshot('intake-backlog-mobile.png');assert.equal(await evaluate('document.documentElement.scrollWidth>window.innerWidth+1'),false);
+ const planningCalls=[...agents.jobs.values()].filter(j=>j.kind.startsWith('planning-'));assert.equal(planningCalls.length,8,'first planning and promotion each run one draft, two critiques and one refinement');assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({ui:'passed',planningCalls:planningCalls.length,developmentCalls:result.aiCalls.length,tasks:result.tasks.map(t=>({title:t.title,status:t.status,agent:t.builder})),release:true,checks:result.releases.at(-1).verification.checks.length,consoleErrors:errors.length,screenshots:8}));
+}catch(error){console.error('Browser errors:',errors);console.error((await evaluate('document.body.innerText')).slice(-2200));await screenshot('intake-verification-failure.png');throw error;}finally{
+ for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Browser verification ended'));}pending.clear();browser.kill();await runtime.close();await agents.close();await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+}

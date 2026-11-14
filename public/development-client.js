@@ -1,4 +1,4 @@
-import {runner,isLocal} from './agent-client.js?v=0.10.0';
+import {runner,isLocal} from './agent-client.js?v=0.11.0';
 
 const ROOT='/api/agents/development';
 const identifier=value=>{if(!/^[\w-]{1,80}$/.test(value||''))throw new Error('프로젝트 또는 실행 기록의 ID가 올바르지 않습니다.');return encodeURIComponent(value);};
@@ -25,6 +25,7 @@ export class DevelopmentClient{
   start(payload){return this.runner.request(ROOT+'/start',{method:'POST',body:payload});}
   preview(payload){return this.runner.request(ROOT+'/preview',{method:'POST',body:payload});}
   cancel(projectId,requestId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/cancel',{method:'POST',body:requestId?{requestId}:{}});}
+  defer(projectId,taskId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/defer',{method:'POST',body:{taskId}});}
   accept(projectId,payload){return this.runner.request(ROOT+'/'+identifier(projectId)+'/accept',{method:'POST',body:payload});}
   launch(projectId,releaseId,requestId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/launch',{method:'POST',body:requestId?{requestId}:{},timeoutMs:0});}
   stop(projectId,releaseId){return this.runner.request(ROOT+'/'+identifier(projectId)+'/releases/'+identifier(releaseId)+'/stop',{method:'POST',body:{}});}

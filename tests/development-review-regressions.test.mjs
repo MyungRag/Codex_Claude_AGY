@@ -134,9 +134,11 @@ test('a mutating release check cannot contaminate canonical source or block inde
   input.baseline.snapshot.nodes.push({id:'extra',title:'Independent feature',description:'',instructions:'Add separate output.',criteria:'Output exists'});
   input.baseline.snapshot.edges.push({from:'goal',to:'extra'});
   input.handoff.tasks.push({nodeId:'extra',agent:'codex',dependsOn:[],instructions:'Add separate output.',deliverable:'Separate file',criteria:'Output exists'});
-  input.config.maxParallel=1; // Preserve this test's intentionally ordered second-check corruption.
-  const counter=path.join(path.dirname(input.project.path),'fixture-check-counter');
-  input.config.checks[0].args=['--input-type=module','-e',`import {existsSync,readFileSync,writeFileSync} from 'node:fs'; const file=${JSON.stringify(counter)}; const count=existsSync(file)?Number(readFileSync(file,'utf8')):0; writeFileSync(file,String(count+1)); if(count===1)writeFileSync('index.html','BROKEN BY CHECK'); if(!readFileSync('index.html','utf8').includes('data-ready'))process.exit(1);`];
+  const originalCheck=runner.workspace.check.bind(runner.workspace);let corrupted=false;
+  runner.workspace.check=async(copy,checks,options)=>{
+    if(!options?.nodeId&&!corrupted){corrupted=true;checks=checks.map(c=>({...c,command:'node',args:['-e',"require('fs').writeFileSync('index.html','BROKEN BY CHECK')"]}));}
+    return originalCheck(copy,checks,options);
+  };
   const state=await finish(runner,input);
   assert.equal(state.tasks.find(task=>task.id==='extra').status,'passed','a dirty disposable check copy must not prevent later independent work');
   const release=state.releases.find(item=>item.id===state.latestRunnableId);assert.ok(release);

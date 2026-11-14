@@ -59,7 +59,7 @@ test('unready prerequisite blocks its consumer only; independent functionality a
 });
 
 test('single-provider setup completes with explicit self-review rather than throwing an author error',async t=>{
- const {finish}=await setup(t,{ids:['one'],config:{strategy:'verification',roles:{builder:'codex',auditor:'codex',challenger:'codex'}}}),state=await finish();assert.equal(state.tasks[0].status,'passed');assert.equal(state.tasks[0].audit.mode,'self');assert.equal(state.releases.at(-1).verification.reviewMode,'self-or-mixed');
+ const {finish}=await setup(t,{ids:['one'],config:{strategy:'verification',developers:['codex'],roles:{builder:'codex',auditor:'codex',challenger:'codex'}}}),state=await finish();assert.equal(state.tasks[0].status,'passed');assert.equal(state.tasks[0].audit.mode,'self');assert.equal(state.releases.at(-1).verification.reviewMode,'self-or-mixed');
 });
 
 test('browser environment failure remains unverified and does not manufacture an implementation defect',async t=>{
@@ -76,8 +76,45 @@ test('an unavailable independent reviewer falls back once to explicitly labeled 
  const state=await finish();assert.equal(state.tasks[0].status,'passed');assert.equal(state.tasks[0].audit.mode,'self');assert.ok(state.events.some(e=>e.type==='self-review'));assert.equal(agents.calls.filter(c=>c.kind==='development-audit'&&c.agent==='claude').length,1);assert.ok(state.aiCalls.some(c=>c.agent==='claude'&&c.status==='failed'));assert.ok(state.latestRunnableId);
 });
 
-test('cancelling a wave prevents queued calls from starting and settles every activity record',async t=>{
- const {runtime,agents,input}=await setup(t,{ids:['one','two','three'],config:{strategy:'integrated',roles:{builder:'codex',auditor:'codex',challenger:'codex'}}});
+test('cancelling parallel development prevents queued calls from starting and settles every activity record',async t=>{
+ const {runtime,agents,input}=await setup(t,{ids:['one','two','three'],config:{strategy:'integrated',developers:['codex'],roles:{builder:'codex',auditor:'codex',challenger:'codex'}}});
  await runtime.start(input);const deadline=Date.now()+5000;while(!agents.calls.length&&Date.now()<deadline)await delay(5);assert.equal(agents.calls.length,1);await runtime.cancel('parallel');await runtime.runs.get('parallel')?.done;
  const state=await runtime.get('parallel');assert.equal(state.status,'cancelled');assert.equal(agents.calls.length,1);assert.ok(state.aiCalls.length>=2);assert.ok(state.aiCalls.every(c=>c.status==='cancelled'&&c.finishedAt));assert.equal(state.activeAttemptId,null);
+});
+
+test('a newly free slot starts the next independent task while another provider is still waiting',async t=>{
+ let release;const gate=new Promise(r=>{release=r;});t.after(()=>release());
+ const {runtime,agents,input}=await setup(t,{ids:['one','two','three'],config:{maxParallel:2},handler:async(request,payload)=>{if(request.kind==='development-build'&&payload.task.id==='one'){await gate;return build('one');}return request.kind==='development-build'?build(payload.task.id):request.kind==='development-audit'?audit(payload):{summary:'Summary',risks:[],recommendation:'Continue'};}});
+ await runtime.start(input);const deadline=Date.now()+5000;while(!agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='three')&&Date.now()<deadline)await delay(10);
+ assert.ok(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='three'),'free slot must not wait for the first task');assert.ok([...agents.jobs.values()].some(j=>j.context.taskId==='one'&&j.status==='running'));release();await runtime.runs.get('parallel')?.done;assert.equal((await runtime.get('parallel')).status,'completed');
+});
+
+test('integrated mode distributes implementation across selected developers instead of pinning every task to the primary',async t=>{
+ const {agents,finish}=await setup(t,{ids:['one','two','three'],config:{strategy:'integrated'}});const state=await finish();assert.equal(state.status,'completed');const builders=new Set(agents.calls.filter(c=>c.kind==='development-build'&&!c.payload.task.isAssembly).map(c=>c.agent));assert.ok(builders.size>=2);assert.ok(agents.maxActive>=2);
+});
+
+test('a release check exception occurs after independent development and cannot skip final draft assembly',async t=>{
+ const {runtime,agents,finish}=await setup(t,{ids:['one','two','three']});let checked=false;
+ runtime._release=async()=>{checked=true;assert.ok(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='three'));throw new Error('Checkpoint failure');};
+ const state=await finish();assert.ok(checked);assert.equal(state.status,'completed');assert.ok(state.events.some(e=>e.type==='release-blocked'));assert.ok(agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='draft-assembly'));
+});
+
+test('deferring one active task cancels its request while independent work and the draft continue',async t=>{
+ let release;const gate=new Promise(r=>{release=r;});t.after(()=>release());
+ const {runtime,agents,input}=await setup(t,{ids:['one','two'],handler:async(request,payload)=>{if(request.kind==='development-build'&&payload.task.id==='one')await gate;return request.kind==='development-build'?build(payload.task.id):request.kind==='development-audit'?audit(payload):{summary:'Summary',risks:[],recommendation:'Continue'};}});
+ const cancel=agents.cancel.bind(agents);agents.cancel=id=>{const result=cancel(id);release();return result;};
+ await runtime.start(input);const deadline=Date.now()+5000;while(!agents.calls.some(c=>c.kind==='development-build'&&c.payload.task.id==='one')&&Date.now()<deadline)await delay(5);
+ await runtime.defer('parallel',{taskId:'one'});await runtime.runs.get('parallel')?.done;const state=await runtime.get('parallel');assert.equal(state.status,'completed');assert.equal(state.tasks.find(t=>t.id==='one').status,'limited');assert.equal(state.tasks.find(t=>t.id==='two').status,'passed');assert.ok(state.tasks.some(t=>t.isAssembly));assert.match(state.tasks.find(t=>t.id==='one').error,/사용자/);
+});
+
+
+test('deferring final verification preserves the reason and still attempts final draft integration',async t=>{
+ let release;const gate=new Promise(r=>{release=r;});t.after(()=>release());let finalWaiting=false;
+ const {runtime,input}=await setup(t,{ids:['one','two'],config:{maxParallel:1}});
+ const original=runtime._task.bind(runtime);runtime._task=async(state,attempt,operation,task,action)=>{
+  if(task.id==='one'&&action==='verify'){finalWaiting=true;task.status='running';await new Promise((resolve,reject)=>{const stop=()=>reject(new Error('Aborted'));operation.controller.signal.addEventListener('abort',stop,{once:true});gate.then(()=>{operation.controller.signal.removeEventListener('abort',stop);resolve();});});}
+  return original(state,attempt,operation,task,action);
+ };
+ await runtime.start(input);const deadline=Date.now()+5000;while(!finalWaiting&&Date.now()<deadline)await delay(5);assert.ok(finalWaiting);await runtime.defer('parallel',{taskId:'one'});await runtime.runs.get('parallel')?.done;
+ const state=await runtime.get('parallel');assert.equal(state.status,'completed');assert.match(state.tasks.find(t=>t.id==='one').error,/사용자가 이 작업만 보류/);assert.ok(state.tasks.some(t=>t.isAssembly));assert.ok(state.latestRunnableId);
 });

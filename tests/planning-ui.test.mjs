@@ -14,7 +14,7 @@ test('project planning UI edits, inserts, removes, merges, exchanges feedback, r
   window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
   window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new window.Event('close'));};
   let clipboard='';Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async text=>{clipboard=text;}}}});
-  const storage=await import('../public/storage.js?v=0.10.0');await storage.openStore();
+  const storage=await import('../public/storage.js?v=0.11.0');await storage.openStore();
   await storage.saveState({projects:[validateProject({id:'kaf',name:'KAF',description:'대한항공의 가격 비교 프로그램 만들기',instructions:'한국어로 설명해 주세요.'})]},0);
   await import('../public/app.js');
   const $=selector=>document.querySelector(selector),click=selector=>{assert.ok($(selector),selector);$(selector).click();};
@@ -62,7 +62,7 @@ test('project planning UI edits, inserts, removes, merges, exchanges feedback, r
   click('[data-pa="chat-all"]');click('[data-pa="import-reply"]');fill('.planner-dialog [name="agent"]','agy');fill('.planner-dialog [name="response"]','가격 확보 방법은 아직 검토가 필요합니다.');submit('#plan-dialog-form');await waitSave(p.changeNumber);p=await saved();assert.equal(p.messages.at(-1).author,'agy');assert.equal(p.messages.at(-1).kind,'import');
   click('.project-subnav [data-action="overview"]');assert.equal(location.hash,'#kaf');click('[data-action="edit"][data-id="kaf"]');fill('#project-description','대한항공 가격 비교 · 설명 수정');submit('#project-form');await until(()=>!$('dialog[open]'));await until(()=>$('#main').textContent.includes('설명 수정'));
   assert.deepEqual((await saved()).nodes,p.nodes);assert.deepEqual((await saved()).messages,p.messages);
-  click('.project-subnav [data-action="planning"]');assert.equal(document.querySelectorAll('.plan-node').length,p.nodes.length);assert.ok(!$('[data-pa="undo"]').disabled);
+  click('.project-subnav [data-action="planning"]');assert.ok(document.querySelectorAll('.plan-node').length<=p.nodes.length);click('[data-pa="expand-all"]');assert.equal(document.querySelectorAll('.plan-node').length,p.nodes.length);assert.ok(!$('[data-pa="undo"]').disabled);
   // This simulates another tab saving after the board loaded, without relying on BroadcastChannel.
   const oldState=await storage.readState();await storage.saveState({...oldState,projects:oldState.projects.map(x=>({...x,description:'다른 탭 변경'}))},oldState.revision);
   click(`[data-pa="edit"][data-id="${rootId}"]`);fill('#node-editor [name="title"]','오래된 탭의 수정');submit('#node-editor');await until(()=>$('.planner-alert').textContent.includes('다른 탭'));

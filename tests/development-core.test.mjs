@@ -64,12 +64,12 @@ test('checks retain literal argument values and launch uses safe explicit readin
  assert.throws(()=>validateDevelopment({launch:{kind:'command',url:'http://localhost:3000'}}),/실행 명령/);
 });
 
-test('prepared tasks use stable planning ids, primary roles and pending questions do not block all work',()=>{
+test('prepared tasks use stable planning ids, distributed developers and pending questions do not block all work',()=>{
  const {baseline,handoff}=planningFixture(),snapshot=structuredClone({baseline,handoff});
  const config=defaultDevelopment();config.roles={builder:'agy',auditor:'codex',challenger:'claude'};
  const prepared=prepareDevelopmentTasks(baseline,handoff,config);
  assert.deepEqual(prepared.map(t=>t.id),['engine','ui','export']);
- assert.ok(prepared.every(t=>t.builder==='agy'&&t.auditor==='codex'&&t.challenger==='claude'&&t.agent==='agy'));
+ assert.deepEqual(prepared.map(t=>t.builder),['agy','codex','claude']);assert.ok(prepared.every(t=>t.agent===t.builder));
  assert.ok(prepared.every(t=>t.status==='pending'&&t.reviewCount===0&&t.revisionCount===0));
  assert.deepEqual(prepared[1].dependsOn,['engine']);assert.deepEqual(prepared[0].authors,[]);
  prepared[1].dependsOn.push('export');assert.deepEqual({baseline,handoff},snapshot);

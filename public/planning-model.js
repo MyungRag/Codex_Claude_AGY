@@ -1,5 +1,6 @@
-import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.10.0';
-import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.10.0';
+import {intakeState} from './planning-intake-core.js?v=0.11.0';
+import {validateDecisionState,reconcileDecisions,remapDecisionNodes} from './decision-core.js?v=0.11.0';
+import {normalizeExecutionMeta,validateExecutionGraph,executionOrder} from './execution-order.js?v=0.11.0';
 // Serializable graph operations. No agent calls or filesystem access occur here.
 export const AGENTS = [{id:'codex',name:'Codex',short:'C'},{id:'claude',name:'Claude',short:'✳'},{id:'agy',name:'AGY',short:'A'}];
 export const NODE_WIDTH=236, NODE_HEIGHT=204;
@@ -44,7 +45,7 @@ function validateCore(raw){
     return {id:id(m.id),nodeId:m.nodeId,nodeTitle:str(m.nodeTitle??'',100,'대화 대상 이름'),author:m.author,text:str(m.text,6000,'대화'),at:str(m.at,40,'대화 시각'),kind:m.author==='user'?'user':m.kind==='demo'?'demo':m.kind==='live'?'live':'import'};
   });
   const appliedRuns=list(raw.appliedRuns??[],300,'AI 응답 기록').map(id);
-  return {...validateDecisionState(raw,nodes),rootId,nodes,edges,proposals,messages,appliedRuns,demo:raw.demo===true};
+  return {...intakeState(raw),...validateDecisionState(raw,nodes),rootId,nodes,edges,proposals,messages,appliedRuns,demo:raw.demo===true};
 }
 export function validatePlan(raw){
   if(raw==null)return null;
@@ -55,7 +56,7 @@ export function validatePlan(raw){
   const history=list(raw.history??[],60,'변경 이력').map(h=>({id:id(h.id),label:str(h.label,150,'변경 제목'),at:str(h.at,40,'변경 시각')}));
   return {...core,version:1,changeNumber:Number.isSafeInteger(raw.changeNumber)&&raw.changeNumber>=0?raw.changeNumber:0,history,undo:stack('undo'),redo:stack('redo')};
 }
-const coreOf=plan=>clone({rootId:plan.rootId,nodes:plan.nodes,edges:plan.edges,proposals:plan.proposals,messages:plan.messages,appliedRuns:plan.appliedRuns??[],items:plan.items??[],questionCoverage:plan.questionCoverage??[],baselines:plan.baselines??[],handoffs:plan.handoffs??[],reviewHistory:plan.reviewHistory??[],demo:plan.demo});
+const coreOf=plan=>clone({backlog:plan.backlog??[],intakeHistory:plan.intakeHistory??[],rootId:plan.rootId,nodes:plan.nodes,edges:plan.edges,proposals:plan.proposals,messages:plan.messages,appliedRuns:plan.appliedRuns??[],items:plan.items??[],questionCoverage:plan.questionCoverage??[],baselines:plan.baselines??[],handoffs:plan.handoffs??[],reviewHistory:plan.reviewHistory??[],demo:plan.demo});
 export function changePlan(plan,label,operation){
   const next=clone(plan);operation(next);reconcileDecisions(plan,next);
   next.undo=[...plan.undo,{label,snapshot:coreOf(plan)}].slice(-12);next.redo=[];
@@ -137,15 +138,12 @@ export function mergeNodes(plan,ids,input){
   remapDecisionNodes(plan,new Map(ids.map(id=>[id,kept])));
   return kept;
 }
-export function layoutPlan(plan){
-  // Hierarchy determines Y; the full dependency graph ranks peers on X.
-  // Dragging cards changes neither containment nor execution dependencies.
+export function layoutPlan(plan,{collapsed=new Set()}={}){
   validateExecutionGraph(plan.nodes,{rootId:plan.rootId});
-  const rank=new Map(executionOrder(plan.nodes).map((n,index)=>[n.id,index]));
-  const depths=new Map([[plan.rootId,0]]);const visit=node=>{for(const child of childrenOf(plan,node)){const depth=depths.get(node)+1;if((depths.get(child)??-1)<depth){depths.set(child,depth);visit(child);}}};visit(plan.rootId);
-  const layers=new Map();for(const n of plan.nodes){const d=depths.get(n.id)||0;if(!layers.has(d))layers.set(d,[]);layers.get(d).push(n);}
-  const columns=Math.max(...[...layers.values()].map(a=>a.length)), width=columns*(NODE_WIDTH+48);
-  for(const [depth,nodes] of layers)nodes.sort((a,b)=>rank.get(a.id)-rank.get(b.id)).forEach((node,index)=>{node.x=48+(width-nodes.length*(NODE_WIDTH+48))/2+index*(NODE_WIDTH+48);node.y=48+depth*(NODE_HEIGHT+116);});
+  const rank=new Map(executionOrder(plan.nodes).map((n,index)=>[n.id,index])),byId=new Map(plan.nodes.map(n=>[n.id,n])),children=new Map(),seen=new Set();
+  const collect=id=>{if(seen.has(id))return;seen.add(id);const next=collapsed.has(id)?[]:childrenOf(plan,id).filter(child=>!seen.has(child)).sort((a,b)=>rank.get(a)-rank.get(b));children.set(id,next);for(const child of next)collect(child);};collect(plan.rootId);
+  const widths=new Map(),measure=id=>{const width=Math.max(NODE_WIDTH+48,(children.get(id)||[]).reduce((sum,child)=>sum+measure(child),0));widths.set(id,width);return width;};measure(plan.rootId);
+  const placed=new Set(),place=(id,left,depth)=>{if(placed.has(id))return;placed.add(id);const node=byId.get(id);node.x=left+(widths.get(id)-NODE_WIDTH)/2;node.y=48+depth*(NODE_HEIGHT+116);let cursor=left;for(const child of children.get(id)||[]){place(child,cursor,depth+1);cursor+=widths.get(child);}};place(plan.rootId,48,0);
 }
 export function visibleNodes(plan,collapsed){
   const seen=new Set();const visit=node=>{if(seen.has(node))return;seen.add(node);if(!collapsed.has(node))for(const child of childrenOf(plan,node))visit(child);};visit(plan.rootId);return plan.nodes.filter(n=>seen.has(n.id));

@@ -13,6 +13,7 @@ async function fixture(t){
     start:async payload=>{calls.push(['start',payload]);return {...state,status:'running'};},
     preview:async payload=>{calls.push(['preview',payload]);return [{taskId:'task-1',action:'verify',reason:'changed dependency'}];},
     cancel:async(...args)=>{calls.push(['cancel',...args]);return {...state,status:'cancelled'};},
+    defer:async(...args)=>{calls.push(['defer',...args]);return {...state,status:'running'};},
     accept:async(...args)=>{calls.push(['accept',...args]);return state;},
     launch:async(...args)=>{calls.push(['launch',...args]);return {url:'http://127.0.0.1:12345/'};},
     stopLaunch:async(...args)=>{calls.push(['stop',...args]);return {stopped:true};},
@@ -34,7 +35,7 @@ async function fixture(t){
 
 test('development execution and release endpoints remain inside the paired loopback API boundary',async t=>{
   const {calls,origin,headers,call}=await fixture(t);
-  const routes=[['GET','/project-1'],['POST','/start'],['POST','/preview'],['POST','/project-1/cancel'],['POST','/project-1/accept'],['POST','/project-1/releases/release-1/launch'],['GET','/project-1/releases/release-1/download'],['POST','/project-1/releases/release-1/stop']];
+  const routes=[['GET','/project-1'],['POST','/start'],['POST','/preview'],['POST','/project-1/cancel'],['POST','/project-1/defer'],['POST','/project-1/accept'],['POST','/project-1/releases/release-1/launch'],['GET','/project-1/releases/release-1/download'],['POST','/project-1/releases/release-1/stop']];
   for(const [method,route] of routes){
     const options={method,...(method==='POST'?{body:'{}'}:{})};
     assert.equal((await call(route,{...options,headers:{Authorization:''}})).status,401,route);
@@ -63,6 +64,9 @@ test('development API preserves project requests, early cancellation identity, a
   const cancel=await call('/project-1/cancel',{method:'POST',body:JSON.stringify({requestId:payload.requestId})});
   assert.equal(cancel.status,200);
   assert.deepEqual(calls.shift(),['cancel','project-1',{requestId:payload.requestId}]);
+  const deferred=await call('/project-1/defer',{method:'POST',body:JSON.stringify({taskId:'task-1'})});
+  assert.equal(deferred.status,200);assert.equal((await deferred.json()).status,'running');
+  assert.deepEqual(calls.shift(),['defer','project-1',{taskId:'task-1'}]);
   const acceptance={taskId:'task-1',findingId:'task-1-R1-001',reason:'Optional export postponed'};
   assert.equal((await call('/project-1/accept',{method:'POST',body:JSON.stringify(acceptance)})).status,200);
   assert.deepEqual(calls.shift(),['accept','project-1',acceptance]);

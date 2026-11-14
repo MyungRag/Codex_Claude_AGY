@@ -1,9 +1,9 @@
-import {openLeadReview} from './lead-review-ui.js?v=0.10.0';
-import {decisionPrompt} from './decision-model.js?v=0.10.0';
-import {questionSynthesisPrompt,questionSynthesisRepairPrompt,validateQuestionSynthesis} from './review-model.js?v=0.10.0';
-import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.10.0';
-import {decisionTypes,changedQuestionNodes} from './decision-core.js?v=0.10.0';
-import {esc,jobMetadataHTML} from './model-controls.js?v=0.10.0';
+import {openLeadReview} from './lead-review-ui.js?v=0.11.0';
+import {decisionPrompt} from './decision-model.js?v=0.11.0';
+import {questionSynthesisPrompt,questionSynthesisRepairPrompt,validateQuestionSynthesis} from './review-model.js?v=0.11.0';
+import {runner,AGENT_INFO,isLocal} from './agent-client.js?v=0.11.0';
+import {decisionTypes,changedQuestionNodes} from './decision-core.js?v=0.11.0';
+import {esc,jobMetadataHTML} from './model-controls.js?v=0.11.0';
 export async function openDecisionAI({project,plan,kind,nodeIds=[],prompt,onApply,onClose,getApplyDiagnostics=()=>({})}){
  if(document.querySelector('.agent-dialog')){onClose();return;}
  // Older cached responses retain their original apply path; new reviews always use lead synthesis.

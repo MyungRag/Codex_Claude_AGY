@@ -3,7 +3,7 @@
 export const REVIEW_PROMPT_LIMIT=150000;
 export const SYNTHESIS_PROMPT_LIMIT=450000;
 export const AGENT_JOB_BODY_LIMIT=2*1024*1024;
-export const promptLimit=kind=>['organize-merge','questions-merge'].includes(kind)?SYNTHESIS_PROMPT_LIMIT:REVIEW_PROMPT_LIMIT;
+export const promptLimit=kind=>['organize-merge','questions-merge','planning-refine','planning-critique'].includes(kind)?SYNTHESIS_PROMPT_LIMIT:REVIEW_PROMPT_LIMIT;
 export function validatePromptSize(prompt,kind){
  if(typeof prompt!=='string'||!prompt.trim())throw Object.assign(new Error('AI에 전달할 검토 내용이 비어 있습니다.'),{code:'EMPTY_PROMPT'});
  const limit=promptLimit(kind);

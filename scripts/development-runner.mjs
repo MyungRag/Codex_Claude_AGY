@@ -151,6 +151,7 @@ export class DevelopmentRunner{
  async _queue(map,key,fn){const prior=map.get(key)||Promise.resolve();const next=prior.catch(()=>{}).then(fn);map.set(key,next);try{return await next;}finally{if(map.get(key)===next)map.delete(key);}}
  async _ai(state,attempt,operation,provider,kind,payload,task){
   const call={id:randomUUID(),attemptId:attempt.id,agent:provider,kind,role:payload.role,taskId:task?.id||null,status:'queued',requestedAt:now()};state.aiCalls??=[];state.aiCalls.push(call);await this._persist(state);
+  if(task){task.phase='AI 요청 대기';task.waitReason=provider+'의 앞선 요청 또는 실행 자리 대기';}
   return this._queue(this.providerQueues,provider,async()=>{
    let job,onAbort;
    try{
@@ -159,8 +160,8 @@ export class DevelopmentRunner{
     const prompt=JSON.stringify(payload);if(prompt.length>145000)throw problem('코드와 기획 문맥이 AI 요청 크기를 초과합니다. 작업 범위를 나누어 주세요.');
     // Planning jobs use the same provider process pool. Wait rather than fail a task.
     while([...this.agentRunner.jobs?.values()||[]].some(j=>j.agent===provider&&!j.settled&&(j.status==='running'||j.settled===false))){checkAbort(operation.controller.signal);await delay(this.pollMs);}
-    job=this.agentRunner.create({agent:provider,kind,prompt,requestId:randomUUID(),settings:attempt.input.agentSettings[provider],context:{projectId:state.projectId,taskId:task?.id,role:payload.role}});
-    Object.assign(call,{jobId:job.id,status:'running',startedAt:now()});if(task)task.phase=kind==='development-build'?'구현 중':kind==='development-audit'?'검토 중':'분석 중';
+    job=this.agentRunner.create({agent:provider,kind,prompt,requestId:randomUUID(),settings:{...attempt.input.agentSettings[provider],...(!attempt.input.agentSettings[provider]?.waitMinutes&&attempt.input.config.taskMinutes?{waitMinutes:Math.min(20,attempt.input.config.taskMinutes)}:{})},context:{projectId:state.projectId,taskId:task?.id,role:payload.role}});
+    Object.assign(call,{jobId:job.id,status:'running',startedAt:now()});if(task){task.waitReason='';task.phase=kind==='development-build'?'구현 중':kind==='development-audit'?'검토 중':'분석 중';}
     operation.jobs.add(job.id);this._event(state,'agent-start',`${provider} ${kind.replace('development-','')} 요청을 실행합니다.`,{taskId:task?.id??null,agent:provider,jobId:job.id});await this._persist(state);
     onAbort=()=>this.agentRunner.cancel(job.id);operation.controller.signal.addEventListener('abort',onAbort,{once:true});if(operation.controller.signal.aborted)onAbort();
     while(!terminal(job.status)){await delay(this.pollMs);job=this.agentRunner.get(job.id);if(!job)throw problem('AI 요청 기록을 찾지 못했습니다.');}
@@ -192,17 +193,41 @@ export class DevelopmentRunner{
    checkAbort(signal);const workspace=await this.workspace.create({projectId:state.projectId,sourcePath:attempt.input.project.path,attemptId:attempt.id,previousPath:state.workingPath||undefined});checkAbort(signal);state.workingPath=workspace.path;attempt.workspacePath=workspace.path;await this._persist(state);
    const entries=new Map(attempt.plan.map(entry=>[entry.taskId,entry])),pending=new Set(attempt.plan.filter(entry=>['build','verify','analyze'].includes(entry.action)).map(entry=>entry.taskId));
    for(const entry of attempt.plan)if(entry.action==='wait'){const task=state.tasks.find(t=>t.id===entry.taskId);task.status='blocked';task.error=entry.reason;}
-   while(pending.size){
-    checkAbort(signal);const ready=executionOrder(state.tasks).filter(task=>pending.has(task.id)&&!task.dependsOn.some(parent=>pending.has(parent))).slice(0,attempt.input.config.maxParallel);
-    if(!ready.length){for(const taskId of pending){const task=state.tasks.find(t=>t.id===taskId);task.status='blocked';task.error='선행 작업을 확인해야 합니다.';}break;}
-    this._event(state,'wave-start',`독립 작업 ${ready.length}개를 진행합니다. 같은 AI 요청은 순서대로 처리합니다.`,{taskIds:ready.map(t=>t.id)});
-    const outcomes=await Promise.allSettled(ready.map(async task=>{
-     pending.delete(task.id);
-     try{await this._task(state,attempt,operation,task,entries.get(task.id).action);}
-     catch(error){if(signal.aborted||error.name==='AbortError')throw error;task.status=task.artifactSha?'partial':'failed';task.error=errorText(error);this._event(state,'task-error',task.error,{taskId:task.id});await this._persist(state);}
-    }));
-    checkAbort(signal);for(const outcome of outcomes)if(outcome.status==='rejected')throw outcome.reason;
-    await this._release(state,attempt,operation);
+   const running=new Map();operation.tasks=new Map();
+   const dispatch=task=>{
+    pending.delete(task.id);task.waitReason='';
+    if(attempt.strategy!=='assignment'&&entries.get(task.id).action==='build'){
+     const pool=attempt.input.config.developers,load=agent=>[...running.keys()].filter(id=>state.tasks.find(t=>t.id===id)?.builder===agent).length;
+     task.builder=[...pool].sort((a,b)=>load(a)-load(b)||Number(b===task.builder)-Number(a===task.builder))[0];task.agent=task.builder;
+     task.auditor=attempt.roles.auditor===task.builder&&task.builder!==attempt.roles.builder?(pool.find(a=>a!==task.builder)||task.builder):attempt.roles.auditor;
+    }
+    const child={controller:new AbortController(),jobs:new Set()},cancel=()=>child.controller.abort();signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();operation.tasks.set(task.id,child);
+    const minutes=attempt.input.config.taskMinutes,timer=minutes?setTimeout(()=>{child.deferred=true;child.reason='작업별 대기 한도에 도달했습니다. 다른 작업은 계속합니다.';child.controller.abort();},minutes*60000):null;timer?.unref?.();
+    const work=(async()=>{
+     try{
+      try{await this._task(state,attempt,child,task,entries.get(task.id).action);}
+      catch(error){
+       const alternative=attempt.input.config.developers.find(agent=>agent!==task.builder);
+       if(signal.aborted||child.controller.signal.aborted||task.artifactSha||entries.get(task.id).action!=='build'||!alternative)throw error;
+       this._event(state,'builder-fallback',task.builder+' 구현 요청 실패: '+errorText(error)+' '+alternative+'에게 1회 재배정합니다.',{taskId:task.id});task.builder=alternative;task.agent=alternative;await this._persist(state);await this._task(state,attempt,child,task,'build');
+      }
+     }
+     catch(error){
+      if(signal.aborted)throw error;
+      task.status=task.artifactSha?'partial':'limited';task.retryable=true;task.phase='보류 · 나머지 계속';task.error=child.deferred?child.reason:errorText(error);
+      this._event(state,'task-error',task.error,{taskId:task.id});await this._persist(state);
+     }finally{clearTimeout(timer);signal.removeEventListener('abort',cancel);operation.tasks.delete(task.id);}
+    })();child.done=work;running.set(task.id,work);work.then(()=>running.delete(task.id),()=>running.delete(task.id));
+   };
+   while(pending.size||running.size){
+    checkAbort(signal);
+    for(const task of executionOrder(state.tasks).filter(t=>pending.has(t.id))){
+     const parents=task.dependsOn.filter(id=>pending.has(id)||running.has(id));task.waitReason=parents.length?'선행 작업 진행 중: '+parents.map(id=>state.tasks.find(t=>t.id===id)?.title||id).join(' · '):running.size>=attempt.input.config.maxParallel?'동시 진행 자리 대기':'';
+     if(!parents.length&&running.size<attempt.input.config.maxParallel)dispatch(task);
+    }
+    await this._persist(state);
+    if(!running.size){if([...pending].some(id=>!state.tasks.find(t=>t.id===id).dependsOn.some(parent=>pending.has(parent))))continue;for(const taskId of pending){const task=state.tasks.find(t=>t.id===taskId);task.status='blocked';task.error='선행 작업을 확인해야 합니다.';}break;}
+    await Promise.race(running.values());
    }
    checkAbort(signal);
    // The final artifact can include later edits. Never attach an earlier audit to its SHA.
@@ -210,7 +235,7 @@ export class DevelopmentRunner{
    for(const task of state.tasks.filter(task=>task.status==='passed'&&task.audit?.codeSha!==finalSha)){
     const counts=attempt.taskCounts[task.id],round=counts?.rounds.at(-1);
     if(round&&round.reviews>=attempt.limits.maxReviews){task.status='limited';task.retryable=true;task.findings.push(this._finding(task,attempt,'FINAL',{type:'unverified',severity:'medium',summary:'마지막 통합 코드의 추가 검토가 필요합니다.',evidence:'기존 검토 이후 다른 작업의 코드가 반영되었고 이번 조합의 검토 한도에 도달했습니다.',remedy:'이 작업의 검증만 다시 실행하거나 검토 한도를 늘려 주세요.'},0));continue;}
-    try{await this._task(state,attempt,operation,task,'verify');}catch(error){if(signal.aborted)throw error;task.status='limited';task.error=errorText(error);}
+    try{await this._boundedTask(state,attempt,operation,task,'verify');}catch(error){if(signal.aborted)throw error;task.status='limited';task.error=errorText(error);}
    }
    // A downstream task may already have an audit for finalSha and therefore be
    // absent from the loop above. A failed prerequisite still invalidates its
@@ -219,12 +244,18 @@ export class DevelopmentRunner{
     const blocked=task.dependsOn.find(parent=>!dependencyReady(state.tasks.find(other=>other.id===parent)));
     if(blocked){task.status='blocked';task.needsVerification=true;task.retryable=true;task.error=`선행 작업 ${state.tasks.find(t=>t.id===blocked)?.title||blocked}의 필수 결과물을 확인해야 합니다.`;this._event(state,'verification-invalidated',task.error,{taskId:task.id,changedBy:blocked});}
    }
+   await this._tryRelease(state,attempt,operation);
    if(state.tasks.some(t=>t.status!=='passed')||!state.latestRunnableId)await this._assembleDraft(state,attempt,operation);
-   await this._release(state,attempt,operation);
+   await this._tryRelease(state,attempt,operation);
    try{const report=await this._ai(state,attempt,operation,attempt.lead,'development-analysis',{role:'overall-lead',strategy:attempt.strategy,baseline:attempt.baseline,runnableRelease:state.releases.find(r=>r.id===state.latestRunnableId)?{id:state.latestRunnableId,stage:state.releases.find(r=>r.id===state.latestRunnableId).stage}:null,tasks:state.tasks.map(t=>({id:t.id,title:t.title,status:t.status,readiness:t.readiness,findings:open(t),checks:t.checks})),rule:'Summarize the actually runnable draft, separately from complete verification. Explain usable functionality, isolated missing features, and next alternatives. Partial implementation and self-review do not mean the whole project must stop. Summarize integration status, unresolved limitations and next steps. Do not override task verdicts or invent verification.'});attempt.summary=redact(report.summary);attempt.recommendation=redact(report.recommendation);}catch(error){if(signal.aborted)throw error;attempt.summary='총괄 요약을 받지 못했습니다. 개별 작업과 검사 기록을 확인해 주세요.';}
    state.status='completed';attempt.status='completed';this._event(state,'completed','개발·검토 실행이 끝났습니다. 개별 판정과 실행 가능한 버전의 한계를 확인해 주세요.');
-  }catch(error){state.status=signal.aborted?'cancelled':'interrupted';attempt.status=state.status;state.error=signal.aborted?null:errorText(error);for(const task of state.tasks)if(task.status==='running'){task.status=task.artifactSha?'partial':'pending';task.error=signal.aborted?'요청을 취소했습니다.':state.error;}this._event(state,state.status,signal.aborted?'AI 요청과 검사를 취소했습니다. 기존 실행 가능한 버전은 유지됩니다.':state.error);}
+  }catch(error){if(signal.aborted)await Promise.allSettled([...(operation.tasks?.values()||[])].map(child=>child.done));state.status=signal.aborted?'cancelled':'interrupted';attempt.status=state.status;state.error=signal.aborted?null:errorText(error);for(const task of state.tasks)if(task.status==='running'){task.status=task.artifactSha?'partial':'pending';task.error=signal.aborted?'요청을 취소했습니다.':state.error;}this._event(state,state.status,signal.aborted?'AI 요청과 검사를 취소했습니다. 기존 실행 가능한 버전은 유지됩니다.':state.error);}
   finally{attempt.finishedAt=now();state.activeAttemptId=null;await this._persist(state);}
+ }
+ async _boundedTask(state,attempt,operation,task,action){
+  const child={controller:new AbortController(),jobs:new Set()},cancel=()=>child.controller.abort(),signal=operation.controller.signal;signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();operation.tasks??=new Map();operation.tasks.set(task.id,child);
+  const minutes=attempt.input.config.taskMinutes,timer=minutes?setTimeout(()=>{child.deferred=true;child.reason='작업별 대기 한도에 도달했습니다. 다른 작업은 계속합니다.';cancel();},minutes*60000):null;timer?.unref?.();
+  try{return await this._task(state,attempt,child,task,action);}catch(error){if(child.deferred&&!signal.aborted){task.phase='보류 · 나머지 계속';task.waitReason='';task.retryable=true;this._event(state,'task-error',child.reason,{taskId:task.id});throw problem(child.reason);}throw error;}finally{clearTimeout(timer);signal.removeEventListener('abort',cancel);operation.tasks.delete(task.id);}
  }
  async _task(state,attempt,operation,task,action){
   // This guard also covers final integrated re-audits, not only initial dispatch.
@@ -298,12 +329,21 @@ export class DevelopmentRunner{
   // Review concrete unresolved defects again on the assembled artifact. Original task verdicts are preserved.
   task.findings=earlier.flatMap(t=>open(t).filter(f=>f.type==='implementation'||f.type==='spec'||f.severity==='critical').map(f=>({...clone(f),id:'assembly-'+f.id,taskId:task.id,sourceTaskId:t.id})));
   state.tasks.push(task);this._event(state,'draft-assembly','주 개발 AI가 동작 가능한 기능을 연결하고 남은 기능을 한계로 정리합니다.',{taskId:task.id});await this._persist(state);
-  try{await this._task(state,attempt,operation,task,'build');}catch(error){if(operation.controller.signal.aborted)throw error;task.status='limited';task.phase='통합 한계';task.error=errorText(error);await this._persist(state);}
+  try{await this._boundedTask(state,attempt,operation,task,'build');}catch(error){if(operation.controller.signal.aborted)throw error;task.status='limited';task.phase='통합 한계';task.error=errorText(error);await this._persist(state);}
  }
  async _checks(copy,config,options){
   const checks=await this.workspace.check(copy,config.checks,options);
   if(!config.checks.length&&this.workspace.automaticChecks)checks.push(...await this.workspace.automaticChecks(copy,config.launch,options));
   return checks;
+ }
+ async _tryRelease(state,attempt,operation){
+  const child={controller:new AbortController()},cancel=()=>child.controller.abort();operation.controller.signal.addEventListener('abort',cancel,{once:true});if(operation.controller.signal.aborted)cancel();
+  const minutes=attempt.input.config.taskMinutes,timer=minutes?setTimeout(cancel,minutes*60000):null;timer?.unref?.();
+  try{await this._release(state,attempt,child);}catch(error){if(operation.controller.signal.aborted)throw error;this._event(state,'release-blocked',child.controller.signal.aborted?'실행 후보 검사 대기 한도에 도달했습니다. 구현과 이전 실행 버전은 보존됩니다.':errorText(error));await this._persist(state);}finally{clearTimeout(timer);operation.controller.signal.removeEventListener('abort',cancel);}
+ }
+ async defer(projectId,{taskId}={}){
+  id(taskId);const state=await this._load(projectId),operation=this.runs.get(projectId),child=operation?.tasks?.get(taskId);
+  if(!child)throw problem('현재 진행 중인 작업을 선택해 주세요.',409);child.deferred=true;child.reason='사용자가 이 작업만 보류했습니다. 독립 작업은 계속합니다.';child.controller.abort();this._event(state,'task-deferred',child.reason,{taskId});await this._persist(state);return this._view(state);
  }
  async _release(state,attempt,operation){
   checkAbort(operation.controller.signal);const config=attempt.input.config;

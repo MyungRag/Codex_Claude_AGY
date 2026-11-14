@@ -7,7 +7,7 @@ import {addDecision} from '../public/decision-model.js';
 test('finalization memo and acknowledgment never trap tab navigation, even when finalization or saving fails',async t=>{
  const {window}=new JSDOM('<main id="planning-root"></main>',{url:'http://127.0.0.1:4173'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
- const {mountPlanner}=await import('../public/planning.js?v=0.10.0');
+ const {mountPlanner}=await import('../public/planning.js?v=0.11.0');
  const project={id:'navigation',name:'Navigation',description:'Drafts survive navigation',instructions:''};
  project.planning=createPlan(project);
  const work=addNode(project.planning,project.planning.rootId,{title:'작업',instructions:'실행한다',criteria:''});

@@ -1,14 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {createPlan,addNode} from '../public/planning-model.js?v=0.10.0';
-import {addDecision,updateDecision} from '../public/decision-model.js?v=0.10.0';
+import {createPlan,addNode} from '../public/planning-model.js?v=0.11.0';
+import {addDecision,updateDecision} from '../public/decision-model.js?v=0.11.0';
 const node=(id,sourceIds,parentId=null,dependsOn=[])=>({id,sourceIds,parentId,title:'작업 '+id,description:'설명',instructions:'계산 기능 구현',criteria:'실제 동작',reason:'기획 정리',nodeType:'task',dependsOn,functionSteps:['구현','검증'],dependencyState:'defined',dependencyIssues:[],order:1});
 async function setup(t,{ambiguous=false,failRepair=false}={}){
  const {window}=new JSDOM('<body></body>',{url:'https://agent-desk.test/'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){};window.HTMLDialogElement.prototype.close=function(){};
- const {runner}=await import('../public/agent-client.js?v=0.10.0'),{openOrganizer}=await import('../public/organize-ui.js?v=0.10.0');
+ const {runner}=await import('../public/agent-client.js?v=0.11.0'),{openOrganizer}=await import('../public/organize-ui.js?v=0.11.0');
  const original=Object.fromEntries(['agents','runnerInfo','token','startPending'].map(k=>[k,runner[k]]));t.after(()=>{Object.assign(runner,original);window.close();});
  runner.agents=['codex','claude','agy'].map(id=>({id,available:true}));runner.runnerInfo={features:{leadReview:true}};runner.token='';
  const project={id:'organize-recovery',name:'공학용 계산기',description:'공학용 계산기 만들기'},plan=createPlan(project),a=addNode(plan,plan.rootId,{title:'계산 엔진',criteria:'계산 가능'}),b=addNode(plan,plan.rootId,{title:'화면',criteria:'입력 가능'}),outside=addNode(plan,plan.rootId,{title:'공통 계약',criteria:'인터페이스'});

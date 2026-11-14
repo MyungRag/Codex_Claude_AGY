@@ -20,7 +20,7 @@ const agent=(value,label)=>{ensure(DEVELOPMENT_AGENTS.includes(value),label+' AI
 const strategyId=value=>{ensure(strategyIds.has(value),'협업 방식을 확인해 주세요.');return value;};
 
 export function defaultDevelopment(){
- return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,maxParallel:3,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
+ return {version:1,strategy:'integrated',lead:'codex',roles:{builder:'codex',auditor:'claude',challenger:'agy'},overrides:{},limits:{maxRevisions:2,maxReviews:3,maxSwitches:1},autoSwitch:false,maxParallel:3,developers:['codex','claude','agy'],taskMinutes:20,checks:[],launch:{kind:'static',entry:'index.html',command:null,url:'',prepare:[]}};
 }
 function rolesFrom(raw,base){
  const result={...base};object(raw,'역할');
@@ -66,7 +66,9 @@ export function validateDevelopment(raw){
   ensure(parsed&&parsed.protocol==='http:'&&['127.0.0.1','localhost'].includes(parsed.hostname)&&!parsed.username&&!parsed.password&&!parsed.hash,'실행 확인 주소는 http://127.0.0.1:{port}/ 같은 현재 PC의 HTTP 주소여야 합니다.');
  }
  const maxParallel=raw.maxParallel??3;ensure(Number.isInteger(maxParallel)&&maxParallel>=1&&maxParallel<=3,'병렬 작업 수는 1~3입니다.');
- return {version:1,strategy,lead,roles,overrides,limits,autoSwitch:raw.autoSwitch===true,maxParallel,checks,launch:{kind,entry,command,url,prepare}};
+ const developers=[...new Set(array(raw.developers??Object.values(roles),3,'개발 참여 AI').map(value=>agent(value,'개발 참여')))];ensure(developers.length,'개발 참여 AI를 하나 이상 선택해 주세요.');
+ const taskMinutes=raw.taskMinutes??20;ensure([0,5,10,20,40].includes(taskMinutes),'작업별 대기 한도를 확인해 주세요.');
+ return {version:1,strategy,lead,roles,overrides,limits,autoSwitch:raw.autoSwitch===true,maxParallel,developers,taskMinutes,checks,launch:{kind,entry,command,url,prepare}};
 }
 
 export function resolveRoles(config,strategy=config?.strategy??'integrated'){
@@ -80,10 +82,11 @@ export function prepareDevelopmentTasks(baseline,handoff,config){
  ensure(handoff&&Array.isArray(handoff.tasks),'저장된 업무 분담안이 필요합니다.');
  if(handoff.baselineId!==undefined)ensure(handoff.baselineId===baseline.id,'업무 분담안과 확정 기획 버전이 다릅니다.');
  const checked=validateDevelopment(config),primary=resolveRoles(checked),tasks=validateTasks(handoff.tasks,baseline.snapshot);
- return tasks.map(task=>{
-  const node=baseline.snapshot.nodes.find(n=>n.id===task.nodeId),builder=checked.strategy==='assignment'?task.agent:primary.builder;
+ const pool=[primary.builder,...checked.developers.filter(a=>a!==primary.builder)].filter(a=>checked.developers.includes(a));
+ return tasks.map((task,index)=>{
+  const node=baseline.snapshot.nodes.find(n=>n.id===task.nodeId),builder=checked.strategy==='assignment'?task.agent:pool[index%pool.length];
   // Assignment mode preserves the named developer; its independent reviewer may differ from the project default.
-  const auditor=checked.strategy==='assignment'&&primary.auditor===builder?DEVELOPMENT_AGENTS.find(value=>value!==builder&&value!==primary.builder)??DEVELOPMENT_AGENTS.find(value=>value!==builder):primary.auditor;
+  const auditor=checked.strategy==='assignment'&&primary.auditor===builder?DEVELOPMENT_AGENTS.find(value=>value!==builder&&value!==primary.builder)??DEVELOPMENT_AGENTS.find(value=>value!==builder):primary.auditor===builder&&builder!==primary.builder?(checked.developers.find(value=>value!==builder)??primary.auditor):primary.auditor;
   const challenger=checked.strategy==='assignment'&&(primary.challenger===builder||primary.challenger===auditor)?DEVELOPMENT_AGENTS.find(value=>value!==builder&&value!==auditor):primary.challenger;
   return {id:recordId(task.nodeId),title:text(node.title,100,'작업 이름'),...normalizeExecutionMeta(task),criteria:task.criteria,instructions:task.instructions,deliverable:task.deliverable,status:'pending',disposition:'open',agent:builder,builder,auditor,challenger,authors:[],findings:[],checks:[],revisionCount:0,reviewCount:0,artifactSha:null,error:null};
  });

@@ -1,15 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {createPlan,addNode} from '../public/planning-model.js?v=0.10.0';
-import {applyQuestionSynthesis} from '../public/review-model.js?v=0.10.0';
+import {createPlan,addNode} from '../public/planning-model.js?v=0.11.0';
+import {applyQuestionSynthesis} from '../public/review-model.js?v=0.11.0';
 const until=async fn=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,5));}assert.fail('lead review did not finish');};
 
 test('the selected lead integrates three independent results, reuses them for chat, and restores user edits after a failed save',async t=>{
  const {window}=new JSDOM('<body></body>',{url:'https://agent-desk.test/'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){};window.HTMLDialogElement.prototype.close=function(){};
- const {runner}=await import('../public/agent-client.js?v=0.10.0');const original={startPending:runner.startPending,agents:runner.agents,runnerInfo:runner.runnerInfo,token:runner.token};
+ const {runner}=await import('../public/agent-client.js?v=0.11.0');const original={startPending:runner.startPending,agents:runner.agents,runnerInfo:runner.runnerInfo,token:runner.token};
  t.after(()=>{Object.assign(runner,original);window.close();});
  runner.agents=['codex','claude','agy'].map(id=>({id,available:true}));runner.runnerInfo={features:{leadReview:true}};runner.token='';
  const project={id:'lead-ui',name:'계산기',instructions:'',development:{lead:'codex'}},plan=createPlan(project),node=addNode(plan,plan.rootId,{title:'계산',criteria:'정확한 결과'}),calls=[];
@@ -20,7 +20,7 @@ test('the selected lead integrates three independent results, reuses them for ch
   const selected=prompt.includes('기본값은 RAD'),rec=selected?{kind:'user',answer:'RAD',reason:'사용자 추가 요구',messageIds:['review-input']}:proposal.recommendation;
   Object.assign(job,{id:'job-'+calls.length,status:'succeeded',result:kind==='questions-merge'?{summary:'주 AI 통합',items:[{...proposal,existingIds:[],sourceRefs:['codex-1','claude-1','agy-1'],recommendation:rec}],omitted:[]}:{summary:job.agent+' 독립 검토',items:[proposal]}});return job;
  };
- const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.10.0');let saved,fail=true;
+ const {openDecisionAI}=await import('../public/decision-ai-ui.js?v=0.11.0');let saved,fail=true;
  const options={project,plan,kind:'questions',nodeIds:[node.id],onClose(){},onApply:async jobs=>{if(fail)throw new Error('저장 실패');const d=jobs[0].synthesis;saved=applyQuestionSynthesis(plan,d.nodeIds,d.jobs,d.result,d);}};
  await openDecisionAI(options);const $=s=>document.querySelector(s);
  const participant=$('[name=agents][value=agy]');participant.checked=false;participant.dispatchEvent(new window.Event('change',{bubbles:true}));
@@ -50,7 +50,7 @@ async function automaticReviewFixture(t,kind){
  const {window}=new JSDOM('<body></body>',{url:'https://agent-desk.test/'});
  for(const key of ['window','document','localStorage','sessionStorage','location','FormData'])globalThis[key]=key==='window'?window:window[key];
  window.HTMLDialogElement.prototype.showModal=function(){};window.HTMLDialogElement.prototype.close=function(){};
- const {runner}=await import('../public/agent-client.js?v=0.10.0'),{openLeadReview}=await import('../public/lead-review-ui.js?v=0.10.0');
+ const {runner}=await import('../public/agent-client.js?v=0.11.0'),{openLeadReview}=await import('../public/lead-review-ui.js?v=0.11.0');
  const original={startPending:runner.startPending,pollPending:runner.pollPending,cancelPending:runner.cancelPending,refresh:runner.refresh,agents:runner.agents,runnerInfo:runner.runnerInfo,token:runner.token};
  t.after(()=>{Object.assign(runner,original);window.close();});
  runner.agents=['codex','claude','agy'].map(id=>({id,available:true}));runner.runnerInfo={features:{leadReview:true}};runner.token='';
